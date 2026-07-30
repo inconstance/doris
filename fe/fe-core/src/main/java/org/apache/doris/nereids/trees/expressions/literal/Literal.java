@@ -118,6 +118,29 @@ public abstract class Literal extends Expression implements LeafExpression {
 
     public abstract Object getValue();
 
+    /** Keep the physical literal value while attaching the inferred integral result type. */
+    public Literal withDataType(DataType targetType) {
+        if (!(dataType instanceof IntegralType) || !(targetType instanceof IntegralType)
+                || !dataType.equals(targetType)) {
+            throw new IllegalArgumentException("Can not change literal type from " + dataType + " to " + targetType);
+        }
+        IntegralType currentType = (IntegralType) dataType;
+        IntegralType newType = (IntegralType) targetType;
+        if (currentType.getTypeDescriptor() == newType.getTypeDescriptor()) {
+            return this;
+        }
+        if (this instanceof SmallIntLiteral) {
+            return new SmallIntLiteral((SmallIntType) targetType, ((SmallIntLiteral) this).getValue());
+        } else if (this instanceof IntegerLiteral) {
+            return new IntegerLiteral((IntegerType) targetType, ((IntegerLiteral) this).getValue());
+        } else if (this instanceof BigIntLiteral) {
+            return new BigIntLiteral((BigIntType) targetType, ((BigIntLiteral) this).getValue());
+        } else if (this instanceof LargeIntLiteral) {
+            return new LargeIntLiteral((LargeIntType) targetType, ((LargeIntLiteral) this).getValue());
+        }
+        throw new IllegalArgumentException("Unsupported integral literal type: " + getClass().getSimpleName());
+    }
+
     /**
      * Map literal to double, and keep "<=" order.
      * for numeric literal (int/long/double/float), directly convert to double
@@ -212,7 +235,8 @@ public abstract class Literal extends Expression implements LeafExpression {
 
     protected Expression deprecatingUncheckedCastTo(DataType targetType) throws AnalysisException {
         if (this.dataType.equals(targetType)) {
-            return this;
+            return dataType instanceof IntegralType && targetType instanceof IntegralType
+                    ? withDataType(targetType) : this;
         }
         if (this instanceof NullLiteral) {
             return new NullLiteral(targetType);
@@ -254,13 +278,13 @@ public abstract class Literal extends Expression implements LeafExpression {
         if (targetType.isTinyIntType()) {
             return Literal.of(Byte.valueOf(desc));
         } else if (targetType.isSmallIntType()) {
-            return Literal.of(Short.valueOf(desc));
+            return Literal.of(Short.valueOf(desc)).withDataType(targetType);
         } else if (targetType.isIntegerType()) {
-            return Literal.of(Integer.valueOf(desc));
+            return Literal.of(Integer.valueOf(desc)).withDataType(targetType);
         } else if (targetType.isBigIntType()) {
-            return Literal.of(Long.valueOf(desc));
+            return Literal.of(Long.valueOf(desc)).withDataType(targetType);
         } else if (targetType.isLargeIntType()) {
-            return Literal.of(new BigDecimal(desc).toBigInteger());
+            return Literal.of(new BigDecimal(desc).toBigInteger()).withDataType(targetType);
         } else if (targetType.isFloatType()) {
             return Literal.of(Double.valueOf(desc).floatValue());
         } else if (targetType.isDoubleType()) {
@@ -359,6 +383,11 @@ public abstract class Literal extends Expression implements LeafExpression {
     }
 
     protected boolean numericOverflow(BigDecimal value, DataType targetType) {
+        if (targetType.isUnsignedIntegerType()) {
+            BigInteger integerValue = value.toBigInteger();
+            int logicalBits = targetType.width() * 4;
+            return integerValue.signum() < 0 || integerValue.bitLength() > logicalBits;
+        }
         BigDecimal maxVal = value;
         BigDecimal minVal = value;
         if (targetType.isTinyIntType()) {
@@ -404,7 +433,8 @@ public abstract class Literal extends Expression implements LeafExpression {
     @Override
     protected Expression uncheckedCastTo(DataType targetType) throws AnalysisException {
         if (this.dataType.equals(targetType)) {
-            return this;
+            return dataType instanceof IntegralType && targetType instanceof IntegralType
+                    ? withDataType(targetType) : this;
         }
         if (this instanceof NullLiteral) {
             return new NullLiteral(targetType);

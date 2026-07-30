@@ -19,7 +19,6 @@ package org.apache.doris.nereids.trees.expressions.literal;
 
 import org.apache.doris.analysis.IntLiteral;
 import org.apache.doris.analysis.LiteralExpr;
-import org.apache.doris.catalog.Type;
 import org.apache.doris.common.AnalysisException;
 import org.apache.doris.nereids.trees.expressions.visitor.ExpressionVisitor;
 import org.apache.doris.nereids.types.BigIntType;
@@ -32,7 +31,11 @@ public class BigIntLiteral extends IntegerLikeLiteral {
     private final long value;
 
     public BigIntLiteral(long value) {
-        super(BigIntType.INSTANCE);
+        this(BigIntType.INSTANCE, value);
+    }
+
+    BigIntLiteral(BigIntType dataType, long value) {
+        super(dataType);
         this.value = value;
     }
 
@@ -49,7 +52,7 @@ public class BigIntLiteral extends IntegerLikeLiteral {
     @Override
     public LiteralExpr toLegacyLiteral() {
         try {
-            return new IntLiteral(value, Type.BIGINT);
+            return new IntLiteral(value, dataType.toCatalogDataType());
         } catch (AnalysisException e) {
             throw new org.apache.doris.nereids.exceptions.AnalysisException(
                     "Can not convert to legacy literal: " + value, e);

@@ -22,6 +22,7 @@
 #include <gen_cpp/internal_service.pb.h>
 
 #include "core/block/block.h"
+#include "core/type_descriptor_util.h"
 #include "exprs/vexpr_context.h"
 #include "runtime/result_block_buffer.h"
 #include "runtime/runtime_state.h"
@@ -175,6 +176,7 @@ Status VArrowFlightResultWriter::write(RuntimeState* state, Block& input_block) 
     Block block;
     RETURN_IF_ERROR(VExprContext::get_output_block_after_execute_exprs(_output_vexpr_ctxs,
                                                                        input_block, &block));
+    RETURN_IF_ERROR(validate_unsigned_result_block(block, _output_vexpr_ctxs));
 
     {
         SCOPED_SWITCH_THREAD_MEM_TRACKER_LIMITER(_sinker->mem_tracker());

@@ -54,7 +54,7 @@ public abstract class IntegerLikeLiteral extends NumericLiteral {
     @Override
     protected Expression uncheckedCastTo(DataType targetType) throws AnalysisException {
         if (this.dataType.equals(targetType)) {
-            return this;
+            return targetType.isIntegralType() ? withDataType(targetType) : this;
         }
         if (targetType.isDateLikeType()) {
             long value = integralValueToLong(getValue());
@@ -95,13 +95,13 @@ public abstract class IntegerLikeLiteral extends NumericLiteral {
             if (targetType.isTinyIntType()) {
                 return Literal.of((byte) value);
             } else if (targetType.isSmallIntType()) {
-                return Literal.of((short) value);
+                return Literal.of((short) value).withDataType(targetType);
             } else if (targetType.isIntegerType()) {
-                return Literal.of((int) value);
+                return Literal.of((int) value).withDataType(targetType);
             } else if (targetType.isBigIntType()) {
-                return Literal.of(value);
+                return Literal.of(value).withDataType(targetType);
             } else if (targetType.isLargeIntType()) {
-                return Literal.of(BigInteger.valueOf(value));
+                return Literal.of(BigInteger.valueOf(value)).withDataType(targetType);
             }
         }
         return super.uncheckedCastTo(targetType);

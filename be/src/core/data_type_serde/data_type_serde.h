@@ -20,6 +20,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <orc/OrcFile.hh>
 #include <vector>
 
@@ -29,6 +30,7 @@
 #include "core/column/column_nullable.h"
 #include "core/field.h"
 #include "core/string_buffer.hpp"
+#include "core/type_descriptor_util.h"
 #include "core/types.h"
 #include "util/jsonb_document.h"
 #include "util/mysql_row_buffer.h"
@@ -73,6 +75,7 @@ struct ColumnVectorBatch;
     }
 
 namespace doris {
+
 class PValues;
 struct JsonbValue;
 class JsonbOutStream;
@@ -128,6 +131,7 @@ public:
     // Text serialization/deserialization of data types depend on some settings witch we define
     // in formatOptions.
     struct FormatOptions {
+        uint64_t type_descriptor = TYPE_DESCRIPTOR_DEFAULT;
         /**
          * field delimiter is used to separate fields in one row
          */

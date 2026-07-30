@@ -18,6 +18,7 @@
 package org.apache.doris.nereids.trees.expressions;
 
 import org.apache.doris.analysis.ArithmeticExpr.Operator;
+import org.apache.doris.catalog.Type;
 import org.apache.doris.nereids.exceptions.AnalysisException;
 import org.apache.doris.nereids.exceptions.UnboundException;
 import org.apache.doris.nereids.trees.expressions.functions.PropagateNullable;
@@ -25,6 +26,7 @@ import org.apache.doris.nereids.trees.expressions.visitor.ExpressionVisitor;
 import org.apache.doris.nereids.types.DataType;
 import org.apache.doris.nereids.types.DecimalV2Type;
 import org.apache.doris.nereids.types.DecimalV3Type;
+import org.apache.doris.nereids.types.coercion.IntegralType;
 import org.apache.doris.nereids.types.coercion.NumericType;
 import org.apache.doris.nereids.util.TypeCoercionUtils;
 import org.apache.doris.qe.ConnectContext;
@@ -81,9 +83,14 @@ public abstract class BinaryArithmetic extends BinaryOperator implements Propaga
      * get return type if both t1 and t2 are not Decimal Type
      */
     public DataType getDataTypeForOthers(DataType t1, DataType t2) {
+        boolean unsignedResult = this instanceof Mod
+                ? t1.isUnsignedIntegerType()
+                : t1.isUnsignedIntegerType() || t2.isUnsignedIntegerType();
         for (DataType dataType : TypeCoercionUtils.NUMERIC_PRECEDENCE) {
             if (t1.equals(dataType) || t2.equals(dataType)) {
-                return dataType;
+                return unsignedResult && dataType instanceof IntegralType
+                        ? ((IntegralType) dataType).withTypeDescriptor(Type.TYPE_DESCRIPTOR_UNSIGNED_MASK)
+                        : dataType;
             }
         }
         // should not come here

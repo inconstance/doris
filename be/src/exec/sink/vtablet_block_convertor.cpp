@@ -25,6 +25,7 @@
 #include <algorithm>
 #include <memory>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 
@@ -51,6 +52,7 @@
 #include "core/data_type/data_type_struct.h"
 #include "core/data_type/define_primitive_type.h"
 #include "core/data_type/primitive_type.h"
+#include "core/type_descriptor_util.h"
 #include "core/types.h"
 #include "core/wide_integer_to_string.h"
 #include "exprs/function/function_helpers.h"
@@ -328,6 +330,49 @@ Status OlapTableBlockConvertor::_internal_validate_column(RuntimeState* state, B
         }
         return Status::OK();
     };
+
+    const auto type_descriptor = _output_tuple_desc->slots()[slot_index]->type_descriptor();
+    if (is_unsigned_integer_descriptor(type_descriptor)) {
+        auto process_unsigned = [&](const auto& source_column, size_t logical_bits) -> Status {
+            const auto& source_values = source_column.get_data();
+            using ValueType = std::remove_cv_t<std::remove_reference_t<decltype(source_values[0])>>;
+            using UnsignedType = std::make_unsigned_t<ValueType>;
+            std::vector<uint8_t> invalid(row_count, 0);
+            for (size_t j = 0; j < row_count; ++j) {
+                const auto row = rows ? (*rows)[j] : j;
+                invalid[j] = need_to_validate(j, row, _filter_map, null_map) &&
+                             (static_cast<UnsignedType>(source_values[j]) >> logical_bits) != 0;
+            }
+            for (size_t j = 0; j < row_count; ++j) {
+                if (invalid[j]) {
+                    const auto row = rows ? (*rows)[j] : j;
+                    fmt::format_to(error_msg, "value is out of range for unsigned integer");
+                    RETURN_IF_ERROR(set_invalid_and_append_error_msg(row));
+                }
+            }
+            return Status::OK();
+        };
+
+        switch (type->get_primitive_type()) {
+        case TYPE_SMALLINT:
+            RETURN_IF_ERROR(process_unsigned(assert_cast<const ColumnInt16&>(*real_column_ptr), 8));
+            break;
+        case TYPE_INT:
+            RETURN_IF_ERROR(
+                    process_unsigned(assert_cast<const ColumnInt32&>(*real_column_ptr), 16));
+            break;
+        case TYPE_BIGINT:
+            RETURN_IF_ERROR(
+                    process_unsigned(assert_cast<const ColumnInt64&>(*real_column_ptr), 32));
+            break;
+        case TYPE_LARGEINT:
+            RETURN_IF_ERROR(
+                    process_unsigned(assert_cast<const ColumnInt128&>(*real_column_ptr), 64));
+            break;
+        default:
+            return Status::InvalidArgument("Invalid unsigned integer carrier");
+        }
+    }
 
     switch (type->get_primitive_type()) {
     case TYPE_CHAR:

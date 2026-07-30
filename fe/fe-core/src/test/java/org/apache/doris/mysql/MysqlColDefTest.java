@@ -17,8 +17,14 @@
 
 package org.apache.doris.mysql;
 
+import org.apache.doris.catalog.PrimitiveType;
+import org.apache.doris.catalog.ScalarType;
+import org.apache.doris.catalog.Type;
+
+import org.junit.Assert;
 import org.junit.Test;
 
+import java.nio.ByteBuffer;
 
 public class MysqlColDefTest {
     // TODO(dhc): comment to pass ut coverage
@@ -72,5 +78,34 @@ public class MysqlColDefTest {
         //        Assert.assertEquals(0, MysqlProto.readInt1(buf));
         //        Assert.assertEquals(0, MysqlProto.readInt2(buf));
         //        Assert.assertTrue(buf.remaining() == 0);
+    }
+
+    @Test
+    public void testUnsignedResultMetadata() {
+        MysqlSerializer serializer = MysqlSerializer.newInstance();
+        serializer.writeField("u8", Type.UNSIGNED_TINYINT);
+        ByteBuffer buf = serializer.toByteBuffer();
+        for (int i = 0; i < 6; i++) {
+            MysqlProto.readLenEncodedString(buf);
+        }
+        Assert.assertEquals(0x0c, MysqlProto.readVInt(buf));
+        MysqlProto.readInt2(buf);
+        Assert.assertEquals(3, MysqlProto.readInt4(buf));
+        Assert.assertEquals(PrimitiveType.TINYINT.toMysqlType().getCode(), MysqlProto.readInt1(buf));
+        Assert.assertEquals(32, MysqlProto.readInt2(buf));
+    }
+
+    @Test
+    public void testUnsignedSumDecimalResultMetadata() {
+        MysqlSerializer serializer = MysqlSerializer.newInstance();
+        serializer.writeField("sum_u64", ScalarType.createDecimalV3Type(38, 0));
+        ByteBuffer buf = serializer.toByteBuffer();
+        for (int i = 0; i < 6; i++) {
+            MysqlProto.readLenEncodedString(buf);
+        }
+        Assert.assertEquals(0x0c, MysqlProto.readVInt(buf));
+        MysqlProto.readInt2(buf);
+        MysqlProto.readInt4(buf);
+        Assert.assertEquals(PrimitiveType.DECIMAL128.toMysqlType().getCode(), MysqlProto.readInt1(buf));
     }
 }

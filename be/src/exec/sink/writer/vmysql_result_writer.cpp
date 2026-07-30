@@ -44,6 +44,7 @@
 #include "core/data_type/data_type_struct.h"
 #include "core/data_type/define_primitive_type.h"
 #include "core/data_type_serde/data_type_serde.h"
+#include "core/type_descriptor_util.h"
 #include "core/types.h"
 #include "exprs/aggregate/aggregate_function.h"
 #include "exprs/vexpr.h"
@@ -141,6 +142,7 @@ Status VMysqlResultWriter::_write_one_block(RuntimeState* state, Block& block) {
             bool is_const;
             DataTypeSerDeSPtr serde;
             PrimitiveType type;
+            uint64_t type_descriptor;
         };
         auto options = DataTypeSerDe::get_default_format_options();
         options.timezone = &state->timezone_obj();
@@ -170,7 +172,8 @@ Status VMysqlResultWriter::_write_one_block(RuntimeState* state, Block& block) {
             }
             serde->set_return_object_as_string(output_object_data());
             arguments.emplace_back(column_ptr.get(), col_const, serde,
-                                   block.get_by_position(col_idx).type->get_primitive_type());
+                                   block.get_by_position(col_idx).type->get_primitive_type(),
+                                   _output_vexpr_ctxs[col_idx]->root()->type_descriptor());
         }
 
         for (size_t col_idx = 0; col_idx < num_cols; ++col_idx) {
@@ -252,6 +255,7 @@ Status VMysqlResultWriter::_write_one_block(RuntimeState* state, Block& block) {
                         }
 
                     } else {
+                        options.type_descriptor = arguments[col_idx].type_descriptor;
                         RETURN_IF_ERROR(arguments[col_idx].serde->write_column_to_mysql_binary(
                                 *(arguments[col_idx].column), row_buffer, row_idx,
                                 arguments[col_idx].is_const, options));
@@ -297,6 +301,7 @@ Status VMysqlResultWriter::write(RuntimeState* state, Block& input_block) {
     Block block;
     RETURN_IF_ERROR(VExprContext::get_output_block_after_execute_exprs(_output_vexpr_ctxs,
                                                                        input_block, &block));
+    RETURN_IF_ERROR(validate_unsigned_result_block(block, _output_vexpr_ctxs));
 
     if (_is_dry_run) {
         _written_rows += cast_set<int64_t>(block.rows());

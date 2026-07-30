@@ -108,6 +108,8 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import org.apache.commons.codec.digest.DigestUtils;
 
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -508,6 +510,11 @@ public class FoldConstantRuleOnFE extends AbstractExpressionRewriteRule
         if (child.isNullLiteral()) {
             return new NullLiteral(dataType);
         }
+        if (dataType.isUnsignedIntegerType() && dataType.isLargeIntType()
+                && child.getDataType().isNumericType()
+                && new BigDecimal(((Literal) child).getStringValue()).signum() < 0) {
+            return cast;
+        }
         //TODO : use DateTimeChecker to Improve performance.
         // if (child instanceof StringLikeLiteral && dataType instanceof DateLikeType) {
         //     String dateStr = ((StringLikeLiteral) child).getStringValue();
@@ -567,7 +574,17 @@ public class FoldConstantRuleOnFE extends AbstractExpressionRewriteRule
         if (checkedExpr.isPresent()) {
             return checkedExpr.get();
         }
-        return ExpressionEvaluator.INSTANCE.eval(binaryArithmetic);
+        Expression result = ExpressionEvaluator.INSTANCE.eval(binaryArithmetic);
+        DataType resultType = binaryArithmetic.getDataType();
+        if (result instanceof Literal && resultType.isUnsignedIntegerType()) {
+            BigInteger value = new BigInteger(((Literal) result).getStringValue());
+            int logicalBits = resultType.width() * 4;
+            if (value.signum() < 0 || value.bitLength() > logicalBits) {
+                throw new AnalysisException("Integer value is out of range for " + resultType.toSql());
+            }
+            return ((Literal) result).withDataType(resultType);
+        }
+        return result;
     }
 
     @Override

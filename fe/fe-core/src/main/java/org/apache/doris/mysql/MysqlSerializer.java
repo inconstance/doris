@@ -18,6 +18,7 @@
 package org.apache.doris.mysql;
 
 import org.apache.doris.catalog.Column;
+import org.apache.doris.catalog.PrimitiveType;
 import org.apache.doris.catalog.ScalarType;
 import org.apache.doris.catalog.Type;
 
@@ -187,7 +188,7 @@ public class MysqlSerializer {
         // Column length: four byte integer
         writeInt4(getMysqlTypeLength(type));
         // Column type: one byte integer
-        writeInt1(type.getPrimitiveType().toMysqlType().getCode());
+        writeInt1(getMysqlPrimitiveType(type).toMysqlType().getCode());
         // Flags: two byte integer
         writeInt2(getMysqlFlags(type));
         // Decimals: one byte integer
@@ -251,7 +252,7 @@ public class MysqlSerializer {
         // Column length: four byte integer
         writeInt4(getMysqlTypeLength(type));
         // Column type: one byte integer
-        writeInt1(type.getPrimitiveType().toMysqlType().getCode());
+        writeInt1(getMysqlPrimitiveType(type).toMysqlType().getCode());
         // Flags: two byte integer
         writeInt2(getMysqlFlags(type));
         // Decimals: one byte integer
@@ -269,6 +270,9 @@ public class MysqlSerializer {
      * @return
      */
     private int getMysqlTypeLength(Type type) {
+        if (type instanceof ScalarType && ((ScalarType) type).isUnsignedInteger()) {
+            return getUnsignedMysqlTypeLength((ScalarType) type);
+        }
         switch (type.getPrimitiveType()) {
             // MySQL use Tinyint(1) to represent boolean
             case BOOLEAN:
@@ -330,6 +334,27 @@ public class MysqlSerializer {
         }
     }
 
+    private PrimitiveType getMysqlPrimitiveType(Type type) {
+        return type instanceof ScalarType && ((ScalarType) type).isUnsignedInteger()
+                ? ((ScalarType) type).getUnsignedOriginType()
+                : type.getPrimitiveType();
+    }
+
+    private int getUnsignedMysqlTypeLength(ScalarType type) {
+        switch (type.getUnsignedOriginType()) {
+            case TINYINT:
+                return 3;
+            case SMALLINT:
+                return 5;
+            case INT:
+                return 10;
+            case BIGINT:
+                return 20;
+            default:
+                throw new IllegalArgumentException("Unsupported unsigned MySQL type: " + type);
+        }
+    }
+
     // this is used for decimal scale
     public int getMysqlDecimals(Type type) {
         switch (type.getPrimitiveType()) {
@@ -352,6 +377,9 @@ public class MysqlSerializer {
     // see https://github.com/mysql/mysql-server/blob/trunk/include/mysql_com.h#L161
     private int getMysqlFlags(Type type) {
         int flags = 0;
+        if (type instanceof ScalarType && ((ScalarType) type).isUnsignedInteger()) {
+            flags |= 32; // UNSIGNED_FLAG
+        }
         if (type.getPrimitiveType().isVarbinaryType()) {
             flags |= 128; //BINARY_FLAG
         }

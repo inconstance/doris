@@ -19,6 +19,7 @@
 
 #include <arrow/builder.h>
 
+#include <bit>
 #include <cstdint>
 
 #include "common/exception.h"
@@ -539,6 +540,24 @@ Status DataTypeNumberSerDe<T>::write_column_to_mysql_binary(const IColumn& colum
     int buf_ret = 0;
     auto& data = assert_cast<const ColumnType&>(column).get_data();
     const auto col_index = index_check_const(row_idx, col_const);
+    if constexpr (T == TYPE_SMALLINT || T == TYPE_INT || T == TYPE_BIGINT || T == TYPE_LARGEINT) {
+        if (is_unsigned_integer_descriptor(options.type_descriptor)) {
+            if constexpr (T == TYPE_SMALLINT) {
+                buf_ret = result.push_tinyint(
+                        std::bit_cast<Int8>(static_cast<UInt8>(data[col_index])));
+            } else if constexpr (T == TYPE_INT) {
+                buf_ret = result.push_smallint(
+                        std::bit_cast<Int16>(static_cast<UInt16>(data[col_index])));
+            } else if constexpr (T == TYPE_BIGINT) {
+                buf_ret =
+                        result.push_int(std::bit_cast<Int32>(static_cast<UInt32>(data[col_index])));
+            } else if constexpr (T == TYPE_LARGEINT) {
+                buf_ret = result.push_bigint(
+                        std::bit_cast<Int64>(static_cast<UInt64>(data[col_index])));
+            }
+            return buf_ret == 0 ? Status::OK() : Status::InternalError("pack mysql buffer failed.");
+        }
+    }
     if constexpr (T == TYPE_TINYINT) {
         buf_ret = result.push_tinyint(data[col_index]);
     } else if constexpr (T == TYPE_BOOLEAN) {

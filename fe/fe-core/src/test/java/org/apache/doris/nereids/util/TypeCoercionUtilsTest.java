@@ -17,6 +17,7 @@
 
 package org.apache.doris.nereids.util;
 
+import org.apache.doris.catalog.Type;
 import org.apache.doris.nereids.exceptions.AnalysisException;
 import org.apache.doris.nereids.trees.expressions.Add;
 import org.apache.doris.nereids.trees.expressions.Cast;
@@ -24,12 +25,14 @@ import org.apache.doris.nereids.trees.expressions.Divide;
 import org.apache.doris.nereids.trees.expressions.EqualTo;
 import org.apache.doris.nereids.trees.expressions.Expression;
 import org.apache.doris.nereids.trees.expressions.InPredicate;
+import org.apache.doris.nereids.trees.expressions.Mod;
 import org.apache.doris.nereids.trees.expressions.Multiply;
 import org.apache.doris.nereids.trees.expressions.SlotReference;
 import org.apache.doris.nereids.trees.expressions.Subtract;
 import org.apache.doris.nereids.trees.expressions.functions.BoundFunction;
 import org.apache.doris.nereids.trees.expressions.functions.agg.Avg;
 import org.apache.doris.nereids.trees.expressions.functions.agg.Sum;
+import org.apache.doris.nereids.trees.expressions.literal.BigIntLiteral;
 import org.apache.doris.nereids.trees.expressions.literal.CharLiteral;
 import org.apache.doris.nereids.trees.expressions.literal.DateLiteral;
 import org.apache.doris.nereids.trees.expressions.literal.DateTimeLiteral;
@@ -189,6 +192,82 @@ public class TypeCoercionUtilsTest {
         expression = TypeCoercionUtils.processBinaryArithmetic(sub);
         Assertions.assertEquals(expression.child(0),
                 new Cast(multiply.child(0), DecimalV3Type.createDecimalV3Type(10, 3)));
+    }
+
+    @Test
+    public void testUnsignedUsesCarrierForTypeCoercion() {
+        IntegralType unsignedTinyInt = SmallIntType.INSTANCE.withTypeDescriptor(Type.TYPE_DESCRIPTOR_UNSIGNED_MASK);
+        IntegralType unsignedSmallInt = IntegerType.INSTANCE.withTypeDescriptor(Type.TYPE_DESCRIPTOR_UNSIGNED_MASK);
+        IntegralType unsignedInt = BigIntType.INSTANCE.withTypeDescriptor(Type.TYPE_DESCRIPTOR_UNSIGNED_MASK);
+        IntegralType unsignedBigInt = LargeIntType.INSTANCE.withTypeDescriptor(Type.TYPE_DESCRIPTOR_UNSIGNED_MASK);
+
+        Expression u8Result = TypeCoercionUtils.processBinaryArithmetic(new Add(
+                new SlotReference("u8", unsignedTinyInt), new SlotReference("u8", unsignedTinyInt)));
+        Assertions.assertEquals(IntegerType.INSTANCE, u8Result.getDataType());
+        Assertions.assertTrue(u8Result.getDataType().isUnsignedIntegerType());
+
+        Expression u16Result = TypeCoercionUtils.processBinaryArithmetic(new Add(
+                new SlotReference("u16", unsignedSmallInt), new SlotReference("u16", unsignedSmallInt)));
+        Assertions.assertEquals(BigIntType.INSTANCE, u16Result.getDataType());
+        Assertions.assertTrue(u16Result.getDataType().isUnsignedIntegerType());
+
+        SlotReference u64 = new SlotReference("u64", unsignedBigInt);
+        Expression sameCarrier = TypeCoercionUtils.processBinaryArithmetic(new Add(u64, u64));
+        Assertions.assertFalse(sameCarrier.child(0) instanceof Cast);
+        Assertions.assertFalse(sameCarrier.child(1) instanceof Cast);
+
+        SlotReference u32 = new SlotReference("u32", unsignedInt);
+        Expression u32Result = TypeCoercionUtils.processBinaryArithmetic(new Add(u32, u32));
+        Assertions.assertInstanceOf(Cast.class, u32Result.child(0));
+        Assertions.assertInstanceOf(Cast.class, u32Result.child(1));
+        Assertions.assertEquals(LargeIntType.INSTANCE, u32Result.getDataType());
+        Assertions.assertTrue(u32Result.getDataType().isUnsignedIntegerType());
+        Expression u32Subtract = TypeCoercionUtils.processBinaryArithmetic(new Subtract(u32, u32));
+        Assertions.assertEquals(LargeIntType.INSTANCE, u32Subtract.getDataType());
+        Expression u32Multiply = TypeCoercionUtils.processBinaryArithmetic(new Multiply(u32, u32));
+        Assertions.assertEquals(LargeIntType.INSTANCE, u32Multiply.getDataType());
+
+        Expression signedNegative = TypeCoercionUtils.processBinaryArithmetic(
+                new Add(u32, new BigIntLiteral(-1)));
+        Assertions.assertEquals(LargeIntType.INSTANCE, signedNegative.getDataType());
+        Assertions.assertTrue(signedNegative.getDataType().isUnsignedIntegerType());
+        Assertions.assertFalse(signedNegative.child(1).getDataType().isUnsignedIntegerType());
+        Assertions.assertEquals(-1L, ((BigIntLiteral) signedNegative.child(1).child(0)).getValue());
+
+        Expression withDecimal = TypeCoercionUtils.processBinaryArithmetic(
+                new Add(u32, new DecimalV3Literal(new BigDecimal("1.25"))));
+        Assertions.assertTrue(withDecimal.getDataType().isDecimalV3Type());
+        Expression withDouble = TypeCoercionUtils.processBinaryArithmetic(new Add(u32, new DoubleLiteral(1.25)));
+        Assertions.assertEquals(DoubleType.INSTANCE, withDouble.getDataType());
+
+        Expression decimalDivide = TypeCoercionUtils.processDivide(
+                new Divide(u32, new DecimalV3Literal(new BigDecimal("1.25"))));
+        Assertions.assertTrue(decimalDivide.getDataType().isDecimalV3Type());
+        Assertions.assertEquals(4, ((DecimalV3Type) decimalDivide.getDataType()).getScale());
+        Assertions.assertEquals(2, ((DecimalV3Type) decimalDivide.child(1).getDataType()).getScale());
+        Expression u64DecimalDivide = TypeCoercionUtils.processDivide(
+                new Divide(u64, new DecimalV3Literal(new BigDecimal("2.00"))));
+        Assertions.assertTrue(u64DecimalDivide.getDataType().isDecimalV3Type());
+        Assertions.assertEquals(4, ((DecimalV3Type) u64DecimalDivide.getDataType()).getScale());
+        Expression doubleDivide = TypeCoercionUtils.processDivide(new Divide(u32, new DoubleLiteral(2.0)));
+        Assertions.assertEquals(DoubleType.INSTANCE, doubleDivide.getDataType());
+
+        Expression signedMod = TypeCoercionUtils.processBinaryArithmetic(
+                new Mod(new BigIntLiteral(5), u32));
+        Assertions.assertFalse(signedMod.getDataType().isUnsignedIntegerType());
+        Expression unsignedMod = TypeCoercionUtils.processBinaryArithmetic(
+                new Mod(u32, new BigIntLiteral(-2)));
+        Assertions.assertEquals(BigIntType.INSTANCE, unsignedMod.getDataType());
+        Assertions.assertTrue(unsignedMod.getDataType().isUnsignedIntegerType());
+
+        InPredicate in = new InPredicate(u32, ImmutableList.of(new BigIntLiteral(-1), new BigIntLiteral(1)));
+        InPredicate coercedIn = (InPredicate) TypeCoercionUtils.processInPredicate(in);
+        Assertions.assertTrue(coercedIn.getCompareExpr().getDataType().isUnsignedIntegerType());
+
+        SlotReference largeInt = new SlotReference("i128", LargeIntType.INSTANCE);
+        Expression comparison = TypeCoercionUtils.processComparisonPredicate(new EqualTo(u64, largeInt));
+        Assertions.assertFalse(comparison.child(0) instanceof Cast);
+        Assertions.assertFalse(comparison.child(1) instanceof Cast);
     }
 
     @Test

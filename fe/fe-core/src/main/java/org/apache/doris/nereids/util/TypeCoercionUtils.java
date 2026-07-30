@@ -19,6 +19,7 @@ package org.apache.doris.nereids.util;
 
 import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.FunctionSignature;
+import org.apache.doris.catalog.Type;
 import org.apache.doris.common.Pair;
 import org.apache.doris.nereids.annotation.Developing;
 import org.apache.doris.nereids.exceptions.AnalysisException;
@@ -760,6 +761,24 @@ public class TypeCoercionUtils {
         Expression left = divide.left();
         Expression right = divide.right();
 
+        boolean hasUnsigned = left.getDataType().isUnsignedIntegerType()
+                || right.getDataType().isUnsignedIntegerType();
+        if (hasUnsigned && !left.getDataType().isFloatLikeType() && !right.getDataType().isFloatLikeType()
+                && left.getDataType().isNumericType() && right.getDataType().isNumericType()) {
+            if (left.getDataType().isUnsignedIntegerType()) {
+                int precision = ((IntegralType) left.getDataType()).unsignedDecimalDigits();
+                left = castIfNotSameType(left, DecimalV3Type.createDecimalV3Type(precision, 0));
+            }
+            if (right.getDataType().isUnsignedIntegerType()) {
+                int precision = ((IntegralType) right.getDataType()).unsignedDecimalDigits();
+                right = castIfNotSameType(right, DecimalV3Type.createDecimalV3Type(precision, 0));
+            }
+            DecimalV3Type dt1 = DecimalV3Type.forType(getNumResultType(left.getDataType()));
+            DecimalV3Type dt2 = DecimalV3Type.forType(getNumResultType(right.getDataType()));
+            DecimalV3Type retType = divide.getDataTypeForDecimalV3(dt1, dt2);
+            return divide.withChildren(castIfNotSameType(left, retType), castIfNotSameType(right, dt2));
+        }
+
         DataType t1 = TypeCoercionUtils.getNumResultType(left.getDataType());
         DataType t2 = TypeCoercionUtils.getNumResultType(right.getDataType());
 
@@ -800,6 +819,8 @@ public class TypeCoercionUtils {
 
         Expression left = divide.left();
         Expression right = divide.right();
+        boolean hasUnsigned = left.getDataType().isUnsignedIntegerType()
+                || right.getDataType().isUnsignedIntegerType();
 
         DataType t1 = TypeCoercionUtils.getNumResultType(left.getDataType());
         DataType t2 = TypeCoercionUtils.getNumResultType(right.getDataType());
@@ -816,6 +837,13 @@ public class TypeCoercionUtils {
             }
         }
 
+        if (hasUnsigned && commonType instanceof IntegralType) {
+            DataType unsignedType = ((IntegralType) commonType)
+                    .withTypeDescriptor(Type.TYPE_DESCRIPTOR_UNSIGNED_MASK);
+            return divide.withChildren(
+                    castIfNotSameType(left, left.getDataType().isUnsignedIntegerType() ? unsignedType : commonType),
+                    castIfNotSameType(right, right.getDataType().isUnsignedIntegerType() ? unsignedType : commonType));
+        }
         return castChildren(divide, left, right, commonType);
     }
 
@@ -864,6 +892,8 @@ public class TypeCoercionUtils {
 
         Expression left = binaryArithmetic.left();
         Expression right = binaryArithmetic.right();
+        boolean hasUnsigned = left.getDataType().isUnsignedIntegerType()
+                || right.getDataType().isUnsignedIntegerType();
 
         // 1. choose default numeric type for left and right
         DataType t1 = TypeCoercionUtils.getNumResultType(left.getDataType());
@@ -942,8 +972,26 @@ public class TypeCoercionUtils {
             return castChildren(binaryArithmetic, left, right, DoubleType.INSTANCE);
         }
 
-        // add, subtract and multiply do not need to cast children for fixed point type
-        return castChildren(binaryArithmetic, left, right, commonType.promotion());
+        // Reuse the original fixed-point promotion and complete the missing U32-to-U64 step.
+        DataType resultType = commonType.promotion();
+        if (hasUnsigned && commonType.isBigIntType()
+                && (binaryArithmetic instanceof Add || binaryArithmetic instanceof Subtract
+                || binaryArithmetic instanceof Multiply)) {
+            resultType = LargeIntType.INSTANCE;
+        }
+        boolean unsignedResult = binaryArithmetic instanceof Mod
+                ? binaryArithmetic.left().getDataType().isUnsignedIntegerType()
+                : hasUnsigned;
+        if (unsignedResult && resultType instanceof IntegralType) {
+            DataType unsignedType = ((IntegralType) resultType)
+                    .withTypeDescriptor(Type.TYPE_DESCRIPTOR_UNSIGNED_MASK);
+            return binaryArithmetic.withChildren(
+                    castIfNotSameType(left,
+                            left.getDataType().isUnsignedIntegerType() ? unsignedType : resultType),
+                    castIfNotSameType(right,
+                            right.getDataType().isUnsignedIntegerType() ? unsignedType : resultType));
+        }
+        return castChildren(binaryArithmetic, left, right, resultType);
     }
 
     /**

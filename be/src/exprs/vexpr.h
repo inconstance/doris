@@ -25,6 +25,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <ostream>
 #include <string>
 #include <utility>
@@ -205,6 +206,8 @@ public:
     DataTypePtr& data_type() { return _data_type; }
 
     const DataTypePtr& data_type() const { return _data_type; }
+
+    uint64_t type_descriptor() const { return _type_descriptor; }
 
     bool is_slot_ref() const { return _node_type == TExprNodeType::SLOT_REF; }
 
@@ -418,6 +421,7 @@ protected:
     // Used to check what opcode
     TExprOpcode::type _opcode;
     DataTypePtr _data_type;
+    uint64_t _type_descriptor = 0;
     VExprSPtrs _children; // in few hundreds
     TFunction _fn;
 

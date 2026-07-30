@@ -142,6 +142,40 @@ import java.util.Locale;
 class FoldConstantTest extends ExpressionRewriteTestHelper {
 
     @Test
+    void testUnsignedIntegerArithmeticFold() {
+        executor = new ExpressionRuleExecutor(ImmutableList.of(
+                bottomUp(FoldConstantRuleOnFE.VISITOR_INSTANCE)
+        ));
+
+        for (String type : ImmutableList.of("tinyint", "smallint", "int", "bigint")) {
+            Expression analyzed = ExpressionAnalyzer.analyzeFunction(null, null,
+                    PARSER.parseExpression("cast(1 as " + type
+                            + " unsigned) + cast(2 as " + type + " unsigned)"));
+            Expression folded = executor.rewrite(analyzed, context);
+            Assertions.assertInstanceOf(Literal.class, folded);
+            Assertions.assertEquals("3", ((Literal) folded).getStringValue());
+            Assertions.assertTrue(folded.getDataType().isUnsignedIntegerType());
+        }
+
+        Expression analyzed = ExpressionAnalyzer.analyzeFunction(null, null,
+                PARSER.parseExpression("cast(0 as signed) - cast(1 as signed)"));
+        Expression folded = executor.rewrite(analyzed, context);
+        Assertions.assertInstanceOf(Literal.class, folded);
+        Assertions.assertEquals("-1", ((Literal) folded).getStringValue());
+        Assertions.assertFalse(folded.getDataType().isUnsignedIntegerType());
+
+        Expression unsignedUnderflow = ExpressionAnalyzer.analyzeFunction(null, null,
+                PARSER.parseExpression("cast(0 as unsigned) - cast(1 as unsigned)"));
+        Assertions.assertThrows(AnalysisException.class,
+                () -> executor.rewrite(unsignedUnderflow, context));
+
+        Expression unsignedOverflow = ExpressionAnalyzer.analyzeFunction(null, null,
+                PARSER.parseExpression("cast(18446744073709551615 as unsigned) + cast(1 as unsigned)"));
+        Assertions.assertThrows(AnalysisException.class,
+                () -> executor.rewrite(unsignedOverflow, context));
+    }
+
+    @Test
     void testCaseWhenFold() {
         executor = new ExpressionRuleExecutor(ImmutableList.of(
                 bottomUp(FoldConstantRuleOnFE.VISITOR_INSTANCE)

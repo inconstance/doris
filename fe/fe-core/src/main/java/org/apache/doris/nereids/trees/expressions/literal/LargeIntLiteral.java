@@ -38,7 +38,11 @@ public class LargeIntLiteral extends IntegerLikeLiteral {
      * @param value Value.
      */
     public LargeIntLiteral(BigInteger value) {
-        super(LargeIntType.INSTANCE);
+        this(LargeIntType.INSTANCE, value);
+    }
+
+    LargeIntLiteral(LargeIntType dataType, BigInteger value) {
+        super(dataType);
         if (value.compareTo(LargeIntType.MAX_VALUE) > 0 || value.compareTo(LargeIntType.MIN_VALUE) < 0) {
             throw new org.apache.doris.nereids.exceptions.AnalysisException(
                     "Can not create LargeIntLiteral by value : " + value);
@@ -59,7 +63,9 @@ public class LargeIntLiteral extends IntegerLikeLiteral {
     @Override
     public LiteralExpr toLegacyLiteral() {
         try {
-            return new org.apache.doris.analysis.LargeIntLiteral(value.toString());
+            LiteralExpr literal = new org.apache.doris.analysis.LargeIntLiteral(value.toString());
+            literal.setType(dataType.toCatalogDataType());
+            return literal;
         } catch (AnalysisException e) {
             throw new org.apache.doris.nereids.exceptions.AnalysisException(
                     "Can not convert to legacy literal: " + value, e);

@@ -367,6 +367,10 @@ VExpr::VExpr(const TExprNode& node)
     }
     _data_type = get_data_type_with_default_argument(
             DataTypeFactory::instance().create_data_type(node.type, is_nullable));
+    if (!node.type.types.empty() && node.type.types[0].__isset.scalar_type &&
+        node.type.types[0].scalar_type.__isset.type_descriptor) {
+        _type_descriptor = node.type.types[0].scalar_type.type_descriptor;
+    }
 }
 
 VExpr::VExpr(const VExpr& vexpr) = default;
