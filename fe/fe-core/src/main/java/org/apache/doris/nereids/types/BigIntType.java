@@ -26,26 +26,29 @@ import org.apache.doris.nereids.types.coercion.IntegralType;
  */
 public class BigIntType extends IntegralType implements Int64OrLessType {
 
-    public static final BigIntType INSTANCE = new BigIntType("bigint");
-    public static final BigIntType SIGNED = new BigIntType("signed");
-
+    public static final BigIntType INSTANCE = new BigIntType("bigint", Type.TYPE_DESCRIPTOR_DEFAULT);
+    public static final BigIntType SIGNED = new BigIntType("signed", Type.TYPE_DESCRIPTOR_DEFAULT);
     public static final int RANGE = 19; // The maximum number of digits that BigInt can represent.
+
+    private static final BigIntType UNSIGNED_INSTANCE = new BigIntType(
+            "int unsigned", Type.TYPE_DESCRIPTOR_UNSIGNED_MASK);
     private static final int WIDTH = 8;
 
     private final String simpleName;
 
-    private BigIntType(String simpleName) {
+    private BigIntType(String simpleName, long typeDescriptor) {
+        super(typeDescriptor);
         this.simpleName = simpleName;
     }
 
     @Override
     public Type toCatalogDataType() {
-        return Type.BIGINT;
+        return isUnsigned() ? Type.UNSIGNED_INT : Type.BIGINT;
     }
 
     @Override
     public boolean acceptsType(DataType other) {
-        return other instanceof BigIntType;
+        return equals(other);
     }
 
     @Override
@@ -66,5 +69,20 @@ public class BigIntType extends IntegralType implements Int64OrLessType {
     @Override
     public int range() {
         return RANGE;
+    }
+
+    @Override
+    public boolean equals(Object other) {
+        return other instanceof BigIntType;
+    }
+
+    @Override
+    public IntegralType withTypeDescriptor(long typeDescriptor) {
+        if (typeDescriptor == Type.TYPE_DESCRIPTOR_DEFAULT) {
+            return INSTANCE;
+        } else if (typeDescriptor == Type.TYPE_DESCRIPTOR_UNSIGNED_MASK) {
+            return UNSIGNED_INSTANCE;
+        }
+        throw new IllegalArgumentException("Unsupported BIGINT descriptor: " + typeDescriptor);
     }
 }

@@ -413,6 +413,20 @@ public abstract class DataType {
      */
     @Developing // should support map, struct
     public static DataType fromCatalogType(Type type) {
+        if (type instanceof ScalarType && ((ScalarType) type).isUnsignedInteger()) {
+            switch (type.getPrimitiveType()) {
+                case SMALLINT:
+                    return SmallIntType.INSTANCE.withTypeDescriptor(Type.TYPE_DESCRIPTOR_UNSIGNED_MASK);
+                case INT:
+                    return IntegerType.INSTANCE.withTypeDescriptor(Type.TYPE_DESCRIPTOR_UNSIGNED_MASK);
+                case BIGINT:
+                    return BigIntType.INSTANCE.withTypeDescriptor(Type.TYPE_DESCRIPTOR_UNSIGNED_MASK);
+                case LARGEINT:
+                    return LargeIntType.INSTANCE.withTypeDescriptor(Type.TYPE_DESCRIPTOR_UNSIGNED_MASK);
+                default:
+                    throw new IllegalArgumentException("Unsupported unsigned integer type: " + type);
+            }
+        }
         switch (type.getPrimitiveType()) {
             case BOOLEAN: return BooleanType.INSTANCE;
             case TINYINT: return TinyIntType.INSTANCE;
@@ -638,6 +652,10 @@ public abstract class DataType {
 
     public boolean isIntegralType() {
         return this instanceof IntegralType;
+    }
+
+    public boolean isUnsignedIntegerType() {
+        return this instanceof IntegralType && ((IntegralType) this).isUnsigned();
     }
 
     public boolean isNumericType() {

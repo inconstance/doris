@@ -25,17 +25,19 @@ import org.apache.doris.nereids.types.coercion.IntegralType;
  * SmallInt type in Nereids.
  */
 public class SmallIntType extends IntegralType implements Int16OrLessType {
-    public static final SmallIntType INSTANCE = new SmallIntType();
-
+    public static final SmallIntType INSTANCE = new SmallIntType(Type.TYPE_DESCRIPTOR_DEFAULT);
     public static final int RANGE = 5; // The maximum number of digits that SmallInteger can represent.
+
+    private static final SmallIntType UNSIGNED_INSTANCE = new SmallIntType(Type.TYPE_DESCRIPTOR_UNSIGNED_MASK);
     private static final int WIDTH = 2;
 
-    private SmallIntType() {
+    private SmallIntType(long typeDescriptor) {
+        super(typeDescriptor);
     }
 
     @Override
     public Type toCatalogDataType() {
-        return Type.SMALLINT;
+        return isUnsigned() ? Type.UNSIGNED_TINYINT : Type.SMALLINT;
     }
 
     @Override
@@ -45,12 +47,12 @@ public class SmallIntType extends IntegralType implements Int16OrLessType {
 
     @Override
     public String simpleString() {
-        return "smallint";
+        return isUnsigned() ? "tinyint unsigned" : "smallint";
     }
 
     @Override
     public boolean acceptsType(DataType other) {
-        return other instanceof SmallIntType;
+        return equals(other);
     }
 
     @Override
@@ -66,5 +68,15 @@ public class SmallIntType extends IntegralType implements Int16OrLessType {
     @Override
     public int range() {
         return RANGE;
+    }
+
+    @Override
+    public IntegralType withTypeDescriptor(long typeDescriptor) {
+        if (typeDescriptor == Type.TYPE_DESCRIPTOR_DEFAULT) {
+            return INSTANCE;
+        } else if (typeDescriptor == Type.TYPE_DESCRIPTOR_UNSIGNED_MASK) {
+            return UNSIGNED_INSTANCE;
+        }
+        throw new IllegalArgumentException("Unsupported SMALLINT descriptor: " + typeDescriptor);
     }
 }

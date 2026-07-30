@@ -623,6 +623,9 @@ public class Column implements GsonPostProcessable {
         tColumnType.setScale(this.getScale());
         tColumnType.setVariantMaxSubcolumnsCount(this.getVariantMaxSubcolumnsCount());
         tColumnType.setVariantEnableDocMode(this.getVariantEnableDocMode());
+        if (type.getTypeDescriptor() != Type.TYPE_DESCRIPTOR_DEFAULT) {
+            tColumnType.setTypeDescriptor(type.getTypeDescriptor());
+        }
 
         tColumnType.setIndexLen(this.getOlapColumnIndexSize());
 
@@ -683,6 +686,9 @@ public class Column implements GsonPostProcessable {
         childrenTColumnType.setPrecision(children.getPrecision());
         childrenTColumnType.setScale(children.getScale());
         childrenTColumnType.setIndexLen(children.getOlapColumnIndexSize());
+        if (children.type.getTypeDescriptor() != Type.TYPE_DESCRIPTOR_DEFAULT) {
+            childrenTColumnType.setTypeDescriptor(children.type.getTypeDescriptor());
+        }
 
         childrenTColumn.setColumnType(childrenTColumnType);
         childrenTColumn.setIsAllowNull(children.isAllowNull());

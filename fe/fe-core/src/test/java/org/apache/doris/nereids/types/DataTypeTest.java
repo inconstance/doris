@@ -72,6 +72,17 @@ public class DataTypeTest {
     @Test
     void testFromPrimitiveType() {
         Assertions.assertEquals(DataType.fromCatalogType(Type.STRING), StringType.INSTANCE);
+        IntegralType unsignedTinyInt = SmallIntType.INSTANCE.withTypeDescriptor(Type.TYPE_DESCRIPTOR_UNSIGNED_MASK);
+        IntegralType unsignedSmallInt = IntegerType.INSTANCE.withTypeDescriptor(Type.TYPE_DESCRIPTOR_UNSIGNED_MASK);
+        IntegralType unsignedInt = BigIntType.INSTANCE.withTypeDescriptor(Type.TYPE_DESCRIPTOR_UNSIGNED_MASK);
+        IntegralType unsignedBigInt = LargeIntType.INSTANCE.withTypeDescriptor(Type.TYPE_DESCRIPTOR_UNSIGNED_MASK);
+        Assertions.assertEquals(unsignedTinyInt, DataType.fromCatalogType(unsignedTinyInt.toCatalogDataType()));
+        Assertions.assertEquals(unsignedSmallInt, DataType.fromCatalogType(unsignedSmallInt.toCatalogDataType()));
+        Assertions.assertEquals(unsignedInt, DataType.fromCatalogType(unsignedInt.toCatalogDataType()));
+        Assertions.assertEquals(unsignedBigInt, DataType.fromCatalogType(unsignedBigInt.toCatalogDataType()));
+        Assertions.assertEquals(BigIntType.INSTANCE, unsignedInt);
+        Assertions.assertEquals(BigIntType.INSTANCE.hashCode(), unsignedInt.hashCode());
+        Assertions.assertTrue(unsignedInt.isUnsignedIntegerType());
     }
 
     @Test
@@ -624,7 +635,8 @@ public class DataTypeTest {
         Assertions.assertEquals("bigint", BigIntType.INSTANCE.simpleString());
         Assertions.assertEquals("signed", BigIntType.SIGNED.simpleString());
         Assertions.assertEquals("largeint", LargeIntType.INSTANCE.simpleString());
-        Assertions.assertEquals("unsigned", LargeIntType.UNSIGNED.simpleString());
+        Assertions.assertEquals("bigint unsigned", LargeIntType.INSTANCE
+                .withTypeDescriptor(Type.TYPE_DESCRIPTOR_UNSIGNED_MASK).simpleString());
         Assertions.assertEquals("fractional", FractionalType.INSTANCE.simpleString());
         Assertions.assertEquals("float", FloatType.INSTANCE.simpleString());
         Assertions.assertEquals("double", DoubleType.INSTANCE.simpleString());

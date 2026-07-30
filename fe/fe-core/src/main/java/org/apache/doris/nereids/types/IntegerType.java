@@ -25,17 +25,19 @@ import org.apache.doris.nereids.types.coercion.IntegralType;
  * Integer data type in Nereids.
  */
 public class IntegerType extends IntegralType implements Int32OrLessType {
-    public static final IntegerType INSTANCE = new IntegerType();
-
+    public static final IntegerType INSTANCE = new IntegerType(Type.TYPE_DESCRIPTOR_DEFAULT);
     public static final int RANGE = 10; // The maximum number of digits that Integer can represent.
+
+    private static final IntegerType UNSIGNED_INSTANCE = new IntegerType(Type.TYPE_DESCRIPTOR_UNSIGNED_MASK);
     private static final int WIDTH = 4;
 
-    private IntegerType() {
+    private IntegerType(long typeDescriptor) {
+        super(typeDescriptor);
     }
 
     @Override
     public Type toCatalogDataType() {
-        return Type.INT;
+        return isUnsigned() ? Type.UNSIGNED_SMALLINT : Type.INT;
     }
 
     @Override
@@ -45,12 +47,12 @@ public class IntegerType extends IntegralType implements Int32OrLessType {
 
     @Override
     public String simpleString() {
-        return "int";
+        return isUnsigned() ? "smallint unsigned" : "int";
     }
 
     @Override
     public boolean acceptsType(DataType other) {
-        return other instanceof IntegerType;
+        return equals(other);
     }
 
     @Override
@@ -66,5 +68,15 @@ public class IntegerType extends IntegralType implements Int32OrLessType {
     @Override
     public int range() {
         return RANGE;
+    }
+
+    @Override
+    public IntegralType withTypeDescriptor(long typeDescriptor) {
+        if (typeDescriptor == Type.TYPE_DESCRIPTOR_DEFAULT) {
+            return INSTANCE;
+        } else if (typeDescriptor == Type.TYPE_DESCRIPTOR_UNSIGNED_MASK) {
+            return UNSIGNED_INSTANCE;
+        }
+        throw new IllegalArgumentException("Unsupported INT descriptor: " + typeDescriptor);
     }
 }

@@ -30,8 +30,7 @@ public class TinyIntType extends IntegralType implements Int16OrLessType {
     public static final int RANGE = 3; // The maximum number of digits that TinyIntType can represent.
     private static final int WIDTH = 1;
 
-    private TinyIntType() {
-    }
+    private TinyIntType() {}
 
     @Override
     public Type toCatalogDataType() {
@@ -50,7 +49,7 @@ public class TinyIntType extends IntegralType implements Int16OrLessType {
 
     @Override
     public boolean acceptsType(DataType other) {
-        return other instanceof TinyIntType;
+        return equals(other);
     }
 
     @Override
@@ -66,5 +65,13 @@ public class TinyIntType extends IntegralType implements Int16OrLessType {
     @Override
     public int range() {
         return RANGE;
+    }
+
+    @Override
+    public IntegralType withTypeDescriptor(long typeDescriptor) {
+        if (typeDescriptor == Type.TYPE_DESCRIPTOR_DEFAULT) {
+            return INSTANCE;
+        }
+        throw new IllegalArgumentException("TINYINT cannot carry an unsigned descriptor");
     }
 }

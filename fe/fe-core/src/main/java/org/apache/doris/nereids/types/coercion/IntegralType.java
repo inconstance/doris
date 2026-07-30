@@ -17,10 +17,13 @@
 
 package org.apache.doris.nereids.types.coercion;
 
+import org.apache.doris.catalog.Type;
 import org.apache.doris.nereids.types.BigIntType;
 import org.apache.doris.nereids.types.DataType;
 import org.apache.doris.nereids.types.DecimalV3Type;
+import org.apache.doris.nereids.types.IntegerType;
 import org.apache.doris.nereids.types.LargeIntType;
+import org.apache.doris.nereids.types.SmallIntType;
 
 import org.apache.commons.lang3.NotImplementedException;
 
@@ -30,6 +33,45 @@ import org.apache.commons.lang3.NotImplementedException;
 public class IntegralType extends NumericType {
 
     public static final IntegralType INSTANCE = new IntegralType();
+
+    private final long typeDescriptor;
+
+    protected IntegralType() {
+        this(Type.TYPE_DESCRIPTOR_DEFAULT);
+    }
+
+    protected IntegralType(long typeDescriptor) {
+        if ((typeDescriptor & ~Type.TYPE_DESCRIPTOR_SUPPORTED_MASK) != 0) {
+            throw new IllegalArgumentException("Unsupported type descriptor: " + typeDescriptor);
+        }
+        this.typeDescriptor = typeDescriptor;
+    }
+
+    public long getTypeDescriptor() {
+        return typeDescriptor;
+    }
+
+    public boolean isUnsigned() {
+        return typeDescriptor == Type.TYPE_DESCRIPTOR_UNSIGNED_MASK;
+    }
+
+    public IntegralType withTypeDescriptor(long typeDescriptor) {
+        throw new NotImplementedException("should be implemented by derived class");
+    }
+
+    /** Number of decimal digits required by the logical unsigned range. */
+    public int unsignedDecimalDigits() {
+        if (this instanceof SmallIntType) {
+            return 3;
+        } else if (this instanceof IntegerType) {
+            return 5;
+        } else if (this instanceof BigIntType) {
+            return 10;
+        } else if (this instanceof LargeIntType) {
+            return 20;
+        }
+        throw new IllegalStateException("Unsupported unsigned integral type: " + this);
+    }
 
     @Override
     public DataType defaultConcreteType() {

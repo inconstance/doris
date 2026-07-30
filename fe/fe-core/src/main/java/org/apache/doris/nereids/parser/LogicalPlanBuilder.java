@@ -55,6 +55,7 @@ import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.InfoSchemaDb;
 import org.apache.doris.catalog.KeysType;
 import org.apache.doris.catalog.ScalarType;
+import org.apache.doris.catalog.Type;
 import org.apache.doris.cloud.OnTablesFilter.TableFilterRule;
 import org.apache.doris.cloud.stage.StageUtil;
 import org.apache.doris.common.Config;
@@ -1089,10 +1090,13 @@ import org.apache.doris.nereids.types.DateTimeType;
 import org.apache.doris.nereids.types.DateTimeV2Type;
 import org.apache.doris.nereids.types.DateType;
 import org.apache.doris.nereids.types.DateV2Type;
+import org.apache.doris.nereids.types.IntegerType;
 import org.apache.doris.nereids.types.LargeIntType;
 import org.apache.doris.nereids.types.MapType;
+import org.apache.doris.nereids.types.SmallIntType;
 import org.apache.doris.nereids.types.StructField;
 import org.apache.doris.nereids.types.StructType;
+import org.apache.doris.nereids.types.TinyIntType;
 import org.apache.doris.nereids.types.VarcharType;
 import org.apache.doris.nereids.types.VariantField;
 import org.apache.doris.nereids.types.VariantType;
@@ -3381,7 +3385,7 @@ public class LogicalPlanBuilder extends DorisParserBaseVisitor<Object> {
             if (ctx.dataType() != null) {
                 return ((DataType) typedVisit(ctx.dataType())).conversion();
             } else if (ctx.UNSIGNED() != null) {
-                return LargeIntType.UNSIGNED;
+                return LargeIntType.INSTANCE.withTypeDescriptor(Type.TYPE_DESCRIPTOR_UNSIGNED_MASK);
             } else {
                 return BigIntType.SIGNED;
             }
@@ -5230,7 +5234,21 @@ public class LogicalPlanBuilder extends DorisParserBaseVisitor<Object> {
             }
             List<String> l = Lists.newArrayList(dataType);
             ctx.INTEGER_VALUE().stream().map(ParseTree::getText).forEach(l::add);
-            return DataType.convertPrimitiveFromStrings(l);
+            DataType type = DataType.convertPrimitiveFromStrings(l);
+            if (ctx.UNSIGNED() == null) {
+                return type;
+            }
+            if (type instanceof TinyIntType) {
+                return SmallIntType.INSTANCE.withTypeDescriptor(Type.TYPE_DESCRIPTOR_UNSIGNED_MASK);
+            } else if (type instanceof SmallIntType) {
+                return IntegerType.INSTANCE.withTypeDescriptor(Type.TYPE_DESCRIPTOR_UNSIGNED_MASK);
+            } else if (type instanceof IntegerType) {
+                return BigIntType.INSTANCE.withTypeDescriptor(Type.TYPE_DESCRIPTOR_UNSIGNED_MASK);
+            } else if (type instanceof BigIntType) {
+                return LargeIntType.INSTANCE.withTypeDescriptor(Type.TYPE_DESCRIPTOR_UNSIGNED_MASK);
+            }
+            throw new NotSupportedException("UNSIGNED is only supported for TINYINT, SMALLINT, INT, "
+                    + "INTEGER, and BIGINT, but got " + dataType.toUpperCase(Locale.ROOT));
         });
     }
 

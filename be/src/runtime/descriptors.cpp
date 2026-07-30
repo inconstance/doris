@@ -69,6 +69,10 @@ SlotDescriptor::SlotDescriptor(const TSlotDescriptor& tdesc)
                                           : TColumnAccessPaths {}),
           _is_auto_increment(tdesc.__isset.is_auto_increment ? tdesc.is_auto_increment : false),
           _col_default_value(tdesc.__isset.col_default_value ? tdesc.col_default_value : "") {
+    if (!tdesc.slotType.types.empty() && tdesc.slotType.types[0].__isset.scalar_type
+            && tdesc.slotType.types[0].scalar_type.__isset.type_descriptor) {
+        _type_descriptor = tdesc.slotType.types[0].scalar_type.type_descriptor;
+    }
     if (tdesc.__isset.virtual_column_expr) {
         // Make sure virtual column is valid.
         if (tdesc.virtual_column_expr.nodes.empty()) {

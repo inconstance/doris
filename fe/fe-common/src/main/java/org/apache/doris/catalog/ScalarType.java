@@ -30,6 +30,7 @@ import com.google.gson.annotations.SerializedName;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.util.Locale;
 import java.util.Objects;
 
 /**
@@ -98,6 +99,7 @@ public class ScalarType extends Type {
     }
 
     private static final Logger LOG = LogManager.getLogger(ScalarType.class);
+
     @SerializedName(value = "type")
     private final PrimitiveType type;
 
@@ -232,6 +234,15 @@ public class ScalarType extends Type {
                 Preconditions.checkState(false, "type.name()=" + type.name());
                 return NULL;
         }
+    }
+
+    public static ScalarType createTypeDescriptor(PrimitiveType carrierType, long typeDescriptor) {
+        ScalarType result = new ScalarType(carrierType);
+        result.setTypeDescriptor(typeDescriptor);
+        if (result.isUnsignedInteger()) {
+            result.getUnsignedOriginType();
+        }
+        return result;
     }
 
     public static ScalarType createType(String type) {
@@ -631,6 +642,9 @@ public class ScalarType extends Type {
 
     @Override
     public String toSql(int depth) {
+        if (isUnsignedInteger()) {
+            return getUnsignedOriginType().toString().toLowerCase(Locale.ROOT) + " unsigned";
+        }
         StringBuilder stringBuilder = new StringBuilder();
         switch (type) {
             case CHAR:
@@ -749,6 +763,9 @@ public class ScalarType extends Type {
         node.setType(TTypeNodeType.SCALAR);
         TScalarType scalarType = new TScalarType();
         scalarType.setType(type.toThrift());
+        if (typeDescriptor != TYPE_DESCRIPTOR_DEFAULT) {
+            scalarType.setTypeDescriptor(typeDescriptor);
+        }
         container.setByteSize(byteSize);
 
         switch (type) {
@@ -807,6 +824,28 @@ public class ScalarType extends Type {
 
     public int ordinal() {
         return type.ordinal();
+    }
+
+    public boolean isUnsignedInteger() {
+        return getTypeDescriptor() == TYPE_DESCRIPTOR_UNSIGNED_MASK;
+    }
+
+    public PrimitiveType getUnsignedOriginType() {
+        if (!isUnsignedInteger()) {
+            throw new IllegalStateException("Type descriptor is not an unsigned integer: " + typeDescriptor);
+        }
+        switch (type) {
+            case SMALLINT:
+                return PrimitiveType.TINYINT;
+            case INT:
+                return PrimitiveType.SMALLINT;
+            case BIGINT:
+                return PrimitiveType.INT;
+            case LARGEINT:
+                return PrimitiveType.BIGINT;
+            default:
+                throw new IllegalStateException("Invalid unsigned integer carrier: " + type);
+        }
     }
 
     @Override
@@ -925,6 +964,9 @@ public class ScalarType extends Type {
             return false;
         }
         ScalarType scalarType = (ScalarType) t;
+        if (typeDescriptor != scalarType.typeDescriptor) {
+            return false;
+        }
         if (type.isStringType() && scalarType.isStringType()) {
             return true;
         }
@@ -966,6 +1008,9 @@ public class ScalarType extends Type {
         if (type != other.type) {
             return false;
         }
+        if (typeDescriptor != other.typeDescriptor) {
+            return false;
+        }
         if (type == PrimitiveType.CHAR) {
             return len == other.len;
         }
@@ -985,6 +1030,9 @@ public class ScalarType extends Type {
     public TColumnType toColumnTypeThrift() {
         TColumnType thrift = new TColumnType();
         thrift.type = type.toThrift();
+        if (typeDescriptor != TYPE_DESCRIPTOR_DEFAULT) {
+            thrift.setTypeDescriptor(typeDescriptor);
+        }
         if (type == PrimitiveType.CHAR || type == PrimitiveType.VARCHAR || type == PrimitiveType.HLL) {
             thrift.setLen(len);
         }
@@ -1000,6 +1048,7 @@ public class ScalarType extends Type {
     public int hashCode() {
         int result = 0;
         result = 31 * result + Objects.hashCode(type);
+        result = 31 * result + Long.hashCode(typeDescriptor);
         result = 31 * result + precision;
         result = 31 * result + scale;
         return result;

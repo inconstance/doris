@@ -19,6 +19,7 @@ package org.apache.doris.persist;
 
 import org.apache.doris.catalog.PrimitiveType;
 import org.apache.doris.catalog.ScalarType;
+import org.apache.doris.catalog.Type;
 import org.apache.doris.catalog.VariantType;
 import org.apache.doris.persist.gson.GsonUtils;
 
@@ -37,5 +38,20 @@ public class ScalarTypeTest {
         Assert.assertEquals(scalarType.getVariantMaxSubcolumnsCount(), 0);
         Assert.assertEquals(scalarType.getVariantEnableTypedPathsToSparse(), false);
         Assert.assertEquals(scalarType.getVariantMaxSparseColumnStatisticsSize(), 0);
+    }
+
+    @Test
+    public void testUnsignedIntegerRoundTrip() {
+        ScalarType unsignedInt = Type.UNSIGNED_INT;
+        Assert.assertEquals(PrimitiveType.BIGINT, unsignedInt.getPrimitiveType());
+        Assert.assertEquals(PrimitiveType.INT, unsignedInt.getUnsignedOriginType());
+        Assert.assertEquals("int unsigned", unsignedInt.toSql());
+        Assert.assertEquals(Type.TYPE_DESCRIPTOR_UNSIGNED_MASK, unsignedInt.getTypeDescriptor());
+
+        String json = GsonUtils.GSON.toJson(unsignedInt);
+        ScalarType restored = GsonUtils.GSON.fromJson(json, ScalarType.class);
+        Assert.assertEquals(unsignedInt, restored);
+        Assert.assertEquals("int unsigned", restored.toSql());
+        Assert.assertEquals(unsignedInt, Type.fromThrift(unsignedInt.toThrift()));
     }
 }

@@ -27,24 +27,25 @@ import java.math.BigInteger;
  */
 public class LargeIntType extends IntegralType {
 
-    public static final LargeIntType INSTANCE = new LargeIntType("largeint");
-    public static final LargeIntType UNSIGNED = new LargeIntType("unsigned");
-
+    public static final LargeIntType INSTANCE = new LargeIntType("largeint", Type.TYPE_DESCRIPTOR_DEFAULT);
     public static final BigInteger MAX_VALUE = new BigInteger("170141183460469231731687303715884105727");
     public static final BigInteger MIN_VALUE = new BigInteger("-170141183460469231731687303715884105728");
     public static final int RANGE = 39; // The maximum number of digits that LargeInteger can represent.
 
+    private static final LargeIntType UNSIGNED_INSTANCE = new LargeIntType(
+            "bigint unsigned", Type.TYPE_DESCRIPTOR_UNSIGNED_MASK);
     private static final int WIDTH = 16;
 
     private final String simpleName;
 
-    private LargeIntType(String simpleName) {
+    private LargeIntType(String simpleName, long typeDescriptor) {
+        super(typeDescriptor);
         this.simpleName = simpleName;
     }
 
     @Override
     public Type toCatalogDataType() {
-        return Type.LARGEINT;
+        return isUnsigned() ? Type.UNSIGNED_BIGINT : Type.LARGEINT;
     }
 
     @Override
@@ -59,7 +60,7 @@ public class LargeIntType extends IntegralType {
 
     @Override
     public boolean acceptsType(DataType other) {
-        return other instanceof LargeIntType;
+        return equals(other);
     }
 
     @Override
@@ -75,5 +76,15 @@ public class LargeIntType extends IntegralType {
     @Override
     public int range() {
         return RANGE;
+    }
+
+    @Override
+    public IntegralType withTypeDescriptor(long typeDescriptor) {
+        if (typeDescriptor == Type.TYPE_DESCRIPTOR_DEFAULT) {
+            return INSTANCE;
+        } else if (typeDescriptor == Type.TYPE_DESCRIPTOR_UNSIGNED_MASK) {
+            return UNSIGNED_INSTANCE;
+        }
+        throw new IllegalArgumentException("Unsupported LARGEINT descriptor: " + typeDescriptor);
     }
 }

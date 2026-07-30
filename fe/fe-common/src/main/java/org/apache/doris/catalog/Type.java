@@ -29,6 +29,7 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
+import com.google.gson.annotations.SerializedName;
 import org.apache.commons.lang3.StringUtils;
 
 import java.math.BigDecimal;
@@ -48,6 +49,30 @@ import java.util.Set;
  * as abstract methods that subclasses must implement.
  */
 public abstract class Type {
+    public static final long TYPE_DESCRIPTOR_DEFAULT = 0L;
+    public static final long TYPE_DESCRIPTOR_CODE_MASK = 0xFFFFL;
+    public static final long TYPE_DESCRIPTOR_UNSIGNED_MASK = 1L << 16;
+    public static final long TYPE_DESCRIPTOR_SUPPORTED_MASK = TYPE_DESCRIPTOR_UNSIGNED_MASK;
+
+    @SerializedName(value = "typeDescriptor")
+    protected long typeDescriptor = TYPE_DESCRIPTOR_DEFAULT;
+
+    public long getTypeDescriptor() {
+        validateTypeDescriptor(typeDescriptor);
+        return typeDescriptor;
+    }
+
+    protected void setTypeDescriptor(long typeDescriptor) {
+        validateTypeDescriptor(typeDescriptor);
+        this.typeDescriptor = typeDescriptor;
+    }
+
+    private static void validateTypeDescriptor(long typeDescriptor) {
+        if ((typeDescriptor & ~TYPE_DESCRIPTOR_SUPPORTED_MASK) != 0) {
+            throw new IllegalArgumentException("Unsupported type descriptor: " + typeDescriptor);
+        }
+    }
+
     // Currently only support Array type with max 9 depths.
     public static int MAX_NESTING_DEPTH = 9;
 
@@ -61,6 +86,14 @@ public abstract class Type {
     public static final ScalarType INT = new ScalarType(PrimitiveType.INT);
     public static final ScalarType BIGINT = new ScalarType(PrimitiveType.BIGINT);
     public static final ScalarType LARGEINT = new ScalarType(PrimitiveType.LARGEINT);
+    public static final ScalarType UNSIGNED_TINYINT =
+            ScalarType.createTypeDescriptor(PrimitiveType.SMALLINT, TYPE_DESCRIPTOR_UNSIGNED_MASK);
+    public static final ScalarType UNSIGNED_SMALLINT =
+            ScalarType.createTypeDescriptor(PrimitiveType.INT, TYPE_DESCRIPTOR_UNSIGNED_MASK);
+    public static final ScalarType UNSIGNED_INT =
+            ScalarType.createTypeDescriptor(PrimitiveType.BIGINT, TYPE_DESCRIPTOR_UNSIGNED_MASK);
+    public static final ScalarType UNSIGNED_BIGINT =
+            ScalarType.createTypeDescriptor(PrimitiveType.LARGEINT, TYPE_DESCRIPTOR_UNSIGNED_MASK);
     public static final ScalarType FLOAT = new ScalarType(PrimitiveType.FLOAT);
     public static final ScalarType DOUBLE = new ScalarType(PrimitiveType.DOUBLE);
     public static final ScalarType IPV4 = new ScalarType(PrimitiveType.IPV4);
@@ -926,7 +959,10 @@ public abstract class Type {
             case SCALAR: {
                 Preconditions.checkState(node.isSetScalarType());
                 TScalarType scalarType = node.getScalarType();
-                if (scalarType.getType() == TPrimitiveType.CHAR) {
+                if (scalarType.isSetTypeDescriptor() && scalarType.getTypeDescriptor() != 0) {
+                    PrimitiveType carrierType = PrimitiveType.fromThrift(scalarType.getType());
+                    type = ScalarType.createTypeDescriptor(carrierType, scalarType.getTypeDescriptor());
+                } else if (scalarType.getType() == TPrimitiveType.CHAR) {
                     Preconditions.checkState(scalarType.isSetLen());
                     type = ScalarType.createCharType(scalarType.getLen());
                 } else if (scalarType.getType() == TPrimitiveType.VARCHAR) {
@@ -956,8 +992,7 @@ public abstract class Type {
                             && scalarType.isSetScale());
                     type = ScalarType.createTimeV2Type(scalarType.getScale());
                 } else {
-                    type = ScalarType.createType(
-                            PrimitiveType.fromThrift(scalarType.getType()));
+                    type = ScalarType.createType(PrimitiveType.fromThrift(scalarType.getType()));
                 }
                 ++tmpNodeIdx;
                 break;

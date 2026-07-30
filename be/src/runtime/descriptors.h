@@ -93,6 +93,7 @@ public:
 
     const std::string& col_default_value() const { return _col_default_value; }
     PrimitiveType col_type() const;
+    uint64_t type_descriptor() const { return _type_descriptor; }
 
     std::shared_ptr<doris::TExpr> get_virtual_column_expr() const {
         // virtual_column_expr need do prepare.
@@ -115,6 +116,7 @@ private:
 
     MOCK_REMOVE(const) SlotId _id;
     MOCK_REMOVE(const) DataTypePtr _type;
+    uint64_t _type_descriptor = 0;
     const TupleId _parent;
     const int _col_pos;
     MOCK_REMOVE(const) std::string _col_name;

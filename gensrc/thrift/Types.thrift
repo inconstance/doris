@@ -146,6 +146,9 @@ struct TScalarType {
     // Only set for VARIANT
     5: optional i32 variant_max_subcolumns_count = 0;
     6: optional bool variant_enable_doc_mode = false;
+
+    // Extensible type descriptor. Bit 16 marks UNSIGNED; all other bits are reserved.
+    7: optional i64 type_descriptor
 }
 
 // Represents a field in a STRUCT type.
@@ -286,6 +289,8 @@ struct TColumnType {
   5: optional i32 scale
   6: optional i32 variant_max_subcolumns_count = 0;
   7: optional bool variant_enable_doc_mode = false;
+  // See TScalarType.type_descriptor.
+  8: optional i64 type_descriptor
 }
 
 // A TNetworkAddress is the standard host, port representation of a
