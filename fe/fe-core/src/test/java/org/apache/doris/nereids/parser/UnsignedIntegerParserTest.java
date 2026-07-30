@@ -17,7 +17,10 @@
 
 package org.apache.doris.nereids.parser;
 
+import org.apache.doris.catalog.Type;
 import org.apache.doris.nereids.exceptions.NotSupportedException;
+import org.apache.doris.nereids.trees.expressions.Cast;
+import org.apache.doris.nereids.types.LargeIntType;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -39,5 +42,17 @@ public class UnsignedIntegerParserTest extends ParserTestBase {
         NotSupportedException exception = Assertions.assertThrows(NotSupportedException.class,
                 () -> parser.parseDataType("largeint unsigned"));
         Assertions.assertTrue(exception.getMessage().contains("only supported"));
+    }
+
+    @Test
+    public void testUnsignedCastTargets() {
+        Cast mysqlCast = (Cast) parser.parseExpression("cast(-1 as unsigned)");
+        Cast typedCast = (Cast) parser.parseExpression("cast(-1 as bigint unsigned)");
+        Assertions.assertEquals(LargeIntType.INSTANCE.withTypeDescriptor(Type.TYPE_DESCRIPTOR_UNSIGNED_MASK),
+                mysqlCast.getDataType());
+        Assertions.assertEquals(LargeIntType.INSTANCE.withTypeDescriptor(Type.TYPE_DESCRIPTOR_UNSIGNED_MASK),
+                typedCast.getDataType());
+        Assertions.assertTrue(mysqlCast.isExplicitType());
+        Assertions.assertTrue(typedCast.isExplicitType());
     }
 }

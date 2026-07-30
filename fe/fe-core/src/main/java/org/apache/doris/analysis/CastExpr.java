@@ -126,6 +126,7 @@ public class CastExpr extends Expr {
     protected void toThrift(TExprNode msg) {
         msg.node_type = TExprNodeType.CAST_EXPR;
         msg.setOpcode(opcode);
+        msg.setIsExplicitCast(!isImplicit);
     }
 
     public boolean isImplicit() {

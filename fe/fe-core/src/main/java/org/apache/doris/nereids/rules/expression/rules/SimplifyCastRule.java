@@ -71,7 +71,8 @@ public class SimplifyCastRule implements ExpressionPatternRuleFactory {
 
         // remove redundant cast
         // CAST(value as type), value is type
-        if (cast.getDataType().equals(child.getDataType())) {
+        if (cast.getDataType().equals(child.getDataType())
+                && !(cast.isExplicitType() && cast.getDataType().isUnsignedIntegerType())) {
             return child;
         }
 
@@ -147,7 +148,7 @@ public class SimplifyCastRule implements ExpressionPatternRuleFactory {
         }
 
         if (child != cast.child()) {
-            return new Cast(child, cast.getDataType());
+            return new Cast(child, cast.getDataType(), cast.isExplicitType());
         }
         return cast;
     }

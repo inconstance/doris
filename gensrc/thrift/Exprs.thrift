@@ -325,6 +325,8 @@ struct TExprNode {
   39: optional bool is_cast_nullable
   40: optional TSearchParam search_param
   41: optional bool short_circuit_evaluation
+  // True only for CAST written explicitly by the user.
+  42: optional bool is_explicit_cast = false
 }
 
 // A flattened representation of a tree of Expr nodes, obtained by depth-first

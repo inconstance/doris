@@ -44,7 +44,9 @@ public:
 #ifdef BE_TEST
     VCastExpr() = default;
 #endif
-    VCastExpr(const TExprNode& node) : VExpr(node) {}
+    VCastExpr(const TExprNode& node)
+            : VExpr(node),
+              _is_explicit_cast(node.__isset.is_explicit_cast && node.is_explicit_cast) {}
     ~VCastExpr() override = default;
     Status execute_column(VExprContext* context, const Block* block, Selector* selector,
                           size_t count, ColumnPtr& result_column) const override;
@@ -70,6 +72,7 @@ public:
 protected:
     FunctionBasePtr _function;
     std::string _expr_name;
+    bool _is_explicit_cast = false;
 
 private:
     DataTypePtr _target_data_type;

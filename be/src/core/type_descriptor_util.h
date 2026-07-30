@@ -55,6 +55,10 @@ Status validate_unsigned_range(const IColumn& column, PrimitiveType carrier_type
 
 Status get_unsigned_maximum(PrimitiveType carrier_type, Int128& maximum);
 
+// MySQL defines explicit CAST(negative AS UNSIGNED) modulo 2^64.
+Status normalize_explicit_unsigned_bigint_cast(ColumnPtr& column, PrimitiveType carrier_type,
+                                               uint64_t type_descriptor);
+
 Status validate_unsigned_result_block(
         const Block& block, const std::vector<std::shared_ptr<VExprContext>>& output_expr_ctxs);
 

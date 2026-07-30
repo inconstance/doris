@@ -34,6 +34,7 @@
 #include "core/column/column.h"
 #include "core/column/column_nullable.h"
 #include "core/data_type/data_type_nullable.h"
+#include "core/type_descriptor_util.h"
 #include "exprs/function/simple_function_factory.h"
 #include "exprs/vexpr.h"
 #include "exprs/vexpr_context.h"
@@ -123,6 +124,10 @@ Status VCastExpr::execute_column(VExprContext* context, const Block* block, Sele
                                        temp_block.rows()));
 
     result_column = temp_block.get_by_position(1).column;
+    if (_is_explicit_cast) {
+        RETURN_IF_ERROR(normalize_explicit_unsigned_bigint_cast(
+                result_column, data_type()->get_primitive_type(), type_descriptor()));
+    }
     DCHECK_EQ(result_column->size(), count);
     return Status::OK();
 }
@@ -173,6 +178,10 @@ Status TryCastExpr::execute_column(VExprContext* context, const Block* block, Se
     // it means that there is no error and it will be returned directly.
     if (batch_exec_status.ok()) {
         result_column = temp_block.get_by_position(1).column;
+        if (_is_explicit_cast) {
+            RETURN_IF_ERROR(normalize_explicit_unsigned_bigint_cast(
+                    result_column, data_type()->get_primitive_type(), type_descriptor()));
+        }
         result_column = make_nullable(result_column);
         return batch_exec_status;
     }
@@ -234,7 +243,12 @@ Status TryCastExpr::single_row_execute(VExprContext* context,
         auto single_exec_status = _function->execute(context->fn_context(_fn_context_index),
                                                      single_row_block, {0}, 1, 1);
         if (single_exec_status.ok()) {
-            insert_from_single_row(*single_row_block.get_by_position(1).column, row);
+            auto single_result = single_row_block.get_by_position(1).column;
+            if (_is_explicit_cast) {
+                RETURN_IF_ERROR(normalize_explicit_unsigned_bigint_cast(
+                        single_result, data_type()->get_primitive_type(), type_descriptor()));
+            }
+            insert_from_single_row(*single_result, row);
         } else {
             if (!cast_error_code(single_exec_status)) {
                 return single_exec_status;

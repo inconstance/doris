@@ -101,6 +101,38 @@ Status validate_unsigned_range(const IColumn& input, PrimitiveType carrier_type,
     }
 }
 
+Status normalize_explicit_unsigned_bigint_cast(ColumnPtr& input, PrimitiveType carrier_type,
+                                               uint64_t type_descriptor) {
+    if (!is_unsigned_bigint_descriptor(type_descriptor, carrier_type)) {
+        return Status::OK();
+    }
+    ColumnPtr materialized = input->convert_to_full_column_if_const();
+    const IColumn* values_column = materialized.get();
+    ColumnPtr null_map_column;
+    if (const auto* nullable = check_and_get_column<ColumnNullable>(values_column)) {
+        values_column = nullable->get_nested_column_ptr().get();
+        null_map_column = nullable->get_null_map_column_ptr();
+    }
+    const auto* source = check_and_get_column<ColumnInt128>(values_column);
+    if (source == nullptr) {
+        return Status::InvalidArgument("Invalid BIGINT UNSIGNED cast carrier column: {}",
+                                       values_column->get_name());
+    }
+    auto normalized = ColumnInt128::create();
+    auto& output = normalized->get_data();
+    const auto& values = source->get_data();
+    output.resize(values.size());
+    for (size_t i = 0; i < values.size(); ++i) {
+        output[i] = values[i] < 0 ? values[i] + (Int128 {1} << 64) : values[i];
+    }
+    if (null_map_column) {
+        input = ColumnNullable::create(std::move(normalized), null_map_column);
+    } else {
+        input = std::move(normalized);
+    }
+    return Status::OK();
+}
+
 Status validate_unsigned_result_block(
         const Block& block, const std::vector<std::shared_ptr<VExprContext>>& output_expr_ctxs) {
     if (block.columns() != output_expr_ctxs.size()) {
