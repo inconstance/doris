@@ -20,7 +20,9 @@
 
 #pragma once
 
+#include <cmath>
 #include <cstddef>
+#include <limits>
 #include <memory>
 
 #include "common/exception.h"
@@ -32,6 +34,7 @@
 #include "core/data_type/data_type_nullable.h"
 #include "core/types.h"
 #include "exprs/function/function.h"
+#include "exprs/function/function_unary_arithmetic.h"
 #include "format/format_common.h"
 #if defined(__SSE4_1__) || defined(__aarch64__)
 #include "util/sse_util.hpp"
@@ -811,6 +814,10 @@ public:
 
     bool need_replace_null_data_to_default() const override { return true; }
 
+    bool skip_return_type_check() const override {
+        return rounding_mode == RoundingMode::Ceil || rounding_mode == RoundingMode::Floor;
+    }
+
     /// Get result types by argument types. If the function does not apply to these arguments, throw an exception.
     DataTypePtr get_return_type_impl(const DataTypes& arguments) const override {
         if ((arguments.empty()) || (arguments.size() > 2)) {
@@ -840,6 +847,66 @@ public:
         return Status::OK();
     }
 
+    template <PrimitiveType InputType, PrimitiveType ResultType>
+    static Status execute_decimal_to_decimal(const IColumn* input_column, bool input_is_const,
+                                             const ColumnNumbers& arguments, Block& block,
+                                             uint32_t result, size_t input_rows_count) {
+        using InputColumn = ColumnDecimal<InputType>;
+        using ResultColumn = ColumnDecimal<ResultType>;
+        using InputNative = typename RoundType<InputType>::NativeType;
+        using ResultNative = typename RoundType<ResultType>::NativeType;
+
+        const auto* input = check_and_get_column<InputColumn>(input_column);
+        if (input == nullptr) {
+            return Status::InvalidArgument("Invalid decimal input type for function {}", name);
+        }
+
+        const ColumnInt32* scales = nullptr;
+        bool scale_is_const = false;
+        if (arguments.size() == 2) {
+            const auto& scale_column = block.get_by_position(arguments[1]).column;
+            scale_is_const = is_column_const(*scale_column);
+            const IColumn* scale_data =
+                    scale_is_const
+                            ? &assert_cast<const ColumnConst&>(*scale_column).get_data_column()
+                            : scale_column.get();
+            scales = check_and_get_column<ColumnInt32>(scale_data);
+            if (scales == nullptr) {
+                return Status::InvalidArgument("Invalid scale argument type for function {}", name);
+            }
+        }
+
+        const auto result_type = remove_nullable(block.get_by_position(result).type);
+        const Int16 result_scale = result_type->get_scale();
+        const UInt32 input_scale = input->get_scale();
+        auto output = ResultColumn::create(input_rows_count, result_scale);
+        for (size_t i = 0; i < input_rows_count; ++i) {
+            Int32 scale_arg = 0;
+            if (scales != nullptr) {
+                scale_arg = scales->get_data()[scale_is_const ? 0 : i];
+            }
+            if (scale_arg > std::numeric_limits<Int16>::max() ||
+                scale_arg < std::numeric_limits<Int16>::min()) {
+                return Status::InvalidArgument("Scale argument for function {} is out of bound: {}",
+                                               name, scale_arg);
+            }
+
+            InputNative rounded;
+            DecimalRoundingImpl<InputType, rounding_mode, tie_breaking_mode>::apply(
+                    input->get_element(input_is_const ? 0 : i).value, input_scale, rounded,
+                    static_cast<Int16>(scale_arg));
+            if (scale_arg <= 0) {
+                rounded *= DecimalScaleParams::get_scale_factor<InputType>(result_scale);
+            } else if (scale_arg < result_scale) {
+                rounded *=
+                        DecimalScaleParams::get_scale_factor<InputType>(result_scale - scale_arg);
+            }
+            output->get_element(i).value = static_cast<ResultNative>(rounded);
+        }
+        block.replace_by_position(result, std::move(output));
+        return Status::OK();
+    }
+
     Status execute_impl(FunctionContext* context, Block& block, const ColumnNumbers& arguments,
                         uint32_t result, size_t input_rows_count) const override {
         const ColumnWithTypeAndName& column_general = block.get_by_position(arguments[0]);
@@ -852,6 +919,42 @@ public:
                                                     .get()
                                           : column_general.column.get();
         ColumnPtr res;
+
+        const PrimitiveType input_primitive =
+                remove_nullable(column_general.type)->get_primitive_type();
+        const PrimitiveType result_primitive = remove_nullable(result_type)->get_primitive_type();
+        if (is_decimalv3(input_primitive) && is_decimalv3(result_primitive) &&
+            input_primitive != result_primitive) {
+            Status conversion_status = Status::InternalError("Unsupported decimal conversion");
+            bool converted = false;
+            auto dispatch_input = [&](const auto& input_types) -> bool {
+                using InputDataType = typename std::decay_t<decltype(input_types)>::LeftType;
+                if constexpr (IsDataTypeDecimalV3<InputDataType>) {
+                    auto dispatch_result = [&](const auto& result_types) -> bool {
+                        using ResultDataType =
+                                typename std::decay_t<decltype(result_types)>::LeftType;
+                        if constexpr (IsDataTypeDecimalV3<ResultDataType>) {
+                            conversion_status = execute_decimal_to_decimal<InputDataType::PType,
+                                                                           ResultDataType::PType>(
+                                    col_general, is_col_general_const, arguments, block, result,
+                                    input_rows_count);
+                            converted = true;
+                            return true;
+                        }
+                        return false;
+                    };
+                    return call_on_index_and_data_type<void>(result_primitive, dispatch_result);
+                }
+                return false;
+            };
+            call_on_index_and_data_type<void>(input_primitive, dispatch_input);
+            if (converted) {
+                return conversion_status;
+            }
+            return Status::InvalidArgument("Unsupported decimal conversion from {} to {}",
+                                           column_general.type->get_name(),
+                                           result_type->get_name());
+        }
 
         /// potential argument types:
         /// if the SECOND argument is MISSING(would be considered as ZERO const) or CONST, then we have the following type:
@@ -877,6 +980,42 @@ public:
                     }
                 } else {
                     result_scale = column_result.type->get_scale();
+                }
+
+                if constexpr (rounding_mode == RoundingMode::Ceil ||
+                              rounding_mode == RoundingMode::Floor) {
+                    if (remove_nullable(result_type)->get_primitive_type() == TYPE_BIGINT) {
+                        const auto* decimal_column =
+                                check_and_get_column<ColumnDecimal<DataType::PType>>(col_general);
+                        if (decimal_column == nullptr) {
+                            return false;
+                        }
+                        auto int_column = ColumnInt64::create();
+                        auto& int_data = int_column->get_data();
+                        const auto& decimal_data = decimal_column->get_data();
+                        const size_t result_size = is_col_general_const ? 1 : input_rows_count;
+                        int_data.resize(result_size);
+                        auto scale = DecimalScaleParams::get_scale_factor<DataType::PType>(
+                                remove_nullable(column_general.type)->get_scale());
+                        for (size_t i = 0; i < result_size; ++i) {
+                            auto value = decimal_data[i].value;
+                            auto quotient = value / scale;
+                            if (value % scale != 0) {
+                                if constexpr (rounding_mode == RoundingMode::Ceil) {
+                                    if (value > 0) {
+                                        ++quotient;
+                                    }
+                                } else if (value < 0) {
+                                    --quotient;
+                                }
+                            }
+                            int_data[i] = static_cast<Int64>(quotient);
+                        }
+                        res = is_col_general_const
+                                      ? ColumnConst::create(std::move(int_column), input_rows_count)
+                                      : std::move(int_column);
+                        return true;
+                    }
                 }
             }
 
@@ -953,6 +1092,273 @@ struct RoundName {
 struct RoundBankersName {
     static constexpr auto name = "round_bankers";
 };
+
+// FunctionRounding writes numeric results with the same physical type as its input. MySQL
+// unary CEIL has different result types for integral and FLOAT arguments, so write the widened
+// result directly instead of introducing a separate cast expression and column traversal.
+template <PrimitiveType InputType, RoundingMode Mode>
+struct IntegerValueNumberImpl {
+    static_assert(is_int_or_bool(InputType) || InputType == TYPE_FLOAT);
+    static_assert(Mode == RoundingMode::Ceil || Mode == RoundingMode::Floor);
+
+    static constexpr PrimitiveType ResultType = InputType == TYPE_LARGEINT ? TYPE_LARGEINT
+                                                : InputType == TYPE_FLOAT  ? TYPE_DOUBLE
+                                                                           : TYPE_BIGINT;
+    using InputCppType = typename PrimitiveTypeTraits<InputType>::CppType;
+    using ResultCppType = typename PrimitiveTypeTraits<ResultType>::CppType;
+
+    static inline ResultCppType apply(InputCppType value) {
+        if constexpr (InputType == TYPE_FLOAT) {
+            if constexpr (Mode == RoundingMode::Ceil) {
+                return std::ceil(static_cast<double>(value));
+            }
+            return std::floor(static_cast<double>(value));
+        }
+        return static_cast<ResultCppType>(value);
+    }
+};
+
+template <PrimitiveType InputType>
+using FunctionCeilNumber =
+        FunctionUnaryArithmetic<IntegerValueNumberImpl<InputType, RoundingMode::Ceil>, CeilName,
+                                InputType>;
+
+template <PrimitiveType InputType>
+using FunctionFloorNumber =
+        FunctionUnaryArithmetic<IntegerValueNumberImpl<InputType, RoundingMode::Floor>, FloorName,
+                                InputType>;
+
+template <PrimitiveType InputType, int ArgNum, RoundingMode Mode, typename Name>
+class FunctionIntegerScale : public IFunction {
+    static_assert(is_int_or_bool(InputType));
+    static_assert(Mode == RoundingMode::Round || Mode == RoundingMode::Trunc);
+
+    static constexpr PrimitiveType ResultType =
+            InputType == TYPE_LARGEINT ? TYPE_LARGEINT : TYPE_BIGINT;
+    using InputCppType = typename PrimitiveTypeTraits<InputType>::CppType;
+    using ResultCppType = typename PrimitiveTypeTraits<ResultType>::CppType;
+    using WideType = std::conditional_t<ResultType == TYPE_LARGEINT, wide::Int256, Int128>;
+
+public:
+    static constexpr auto name = Name::name;
+
+    static FunctionPtr create() { return std::make_shared<FunctionIntegerScale>(); }
+
+    String get_name() const override { return name; }
+
+    bool is_variadic() const override { return true; }
+
+    size_t get_number_of_arguments() const override { return 0; }
+
+    DataTypes get_variadic_argument_types_impl() const override {
+        if constexpr (ArgNum == 1) {
+            return {std::make_shared<typename PrimitiveTypeTraits<InputType>::DataType>()};
+        }
+        return {std::make_shared<typename PrimitiveTypeTraits<InputType>::DataType>(),
+                std::make_shared<DataTypeInt32>()};
+    }
+
+    DataTypePtr get_return_type_impl(const DataTypes& arguments) const override {
+        return std::make_shared<typename PrimitiveTypeTraits<ResultType>::DataType>();
+    }
+
+    Status execute_impl(FunctionContext* context, Block& block, const ColumnNumbers& arguments,
+                        uint32_t result, size_t input_rows_count) const override {
+        const auto& input_column = block.get_by_position(arguments[0]).column;
+        const bool input_is_const = is_column_const(*input_column);
+        const IColumn* input_data =
+                input_is_const ? &assert_cast<const ColumnConst&>(*input_column).get_data_column()
+                               : input_column.get();
+        const auto* values = check_and_get_column<ColumnVector<InputType>>(input_data);
+        if (values == nullptr) {
+            return Status::InvalidArgument("Invalid first argument type {} for function {}",
+                                           block.get_by_position(arguments[0]).type->get_name(),
+                                           name);
+        }
+
+        const ColumnInt32* scales = nullptr;
+        bool scale_is_const = false;
+        if constexpr (ArgNum == 2) {
+            const auto& scale_column = block.get_by_position(arguments[1]).column;
+            scale_is_const = is_column_const(*scale_column);
+            const IColumn* scale_data =
+                    scale_is_const
+                            ? &assert_cast<const ColumnConst&>(*scale_column).get_data_column()
+                            : scale_column.get();
+            scales = check_and_get_column<ColumnInt32>(scale_data);
+            if (scales == nullptr) {
+                return Status::InvalidArgument("Invalid second argument type {} for function {}",
+                                               block.get_by_position(arguments[1]).type->get_name(),
+                                               name);
+            }
+        }
+
+        auto result_column = ColumnVector<ResultType>::create();
+        auto& result_data = result_column->get_data();
+        result_data.resize(input_rows_count);
+        const auto& input_values = values->get_data();
+        for (size_t i = 0; i < input_rows_count; ++i) {
+            Int32 scale = 0;
+            if constexpr (ArgNum == 2) {
+                scale = scales->get_data()[scale_is_const ? 0 : i];
+            }
+            RETURN_IF_ERROR(apply(input_values[input_is_const ? 0 : i], scale, result_data[i]));
+        }
+
+        block.replace_by_position(result, std::move(result_column));
+        return Status::OK();
+    }
+
+private:
+    static Status apply(InputCppType input, Int32 scale, ResultCppType& result) {
+        WideType value = static_cast<WideType>(input);
+        if (scale >= 0) {
+            result = static_cast<ResultCppType>(value);
+            return Status::OK();
+        }
+
+        int64_t exponent = -static_cast<int64_t>(scale);
+        constexpr int64_t max_factor_exponent = ResultType == TYPE_LARGEINT ? 38 : 19;
+        if (exponent > max_factor_exponent) {
+            result = 0;
+            return Status::OK();
+        }
+
+        WideType factor = 1;
+        for (int64_t i = 0; i < exponent; ++i) {
+            factor *= 10;
+        }
+        WideType quotient = value / factor;
+        if constexpr (Mode == RoundingMode::Round) {
+            WideType remainder = value % factor;
+            if (remainder * 2 >= factor) {
+                ++quotient;
+            } else if (remainder * 2 <= -factor) {
+                --quotient;
+            }
+        }
+        WideType rounded = quotient * factor;
+        WideType min_result = static_cast<WideType>(std::numeric_limits<ResultCppType>::lowest());
+        WideType max_result = static_cast<WideType>(std::numeric_limits<ResultCppType>::max());
+        if (rounded < min_result || rounded > max_result) {
+            return Status::InvalidArgument("Integer overflow in function {}", name);
+        }
+        result = static_cast<ResultCppType>(rounded);
+        return Status::OK();
+    }
+};
+
+template <PrimitiveType InputType, int ArgNum, RoundingMode Mode, typename Name>
+class FunctionRealScale : public IFunction {
+    static_assert(InputType == TYPE_FLOAT || InputType == TYPE_DOUBLE);
+    static_assert(Mode == RoundingMode::Round || Mode == RoundingMode::Trunc);
+
+    using InputCppType = typename PrimitiveTypeTraits<InputType>::CppType;
+
+public:
+    static constexpr auto name = Name::name;
+
+    static FunctionPtr create() { return std::make_shared<FunctionRealScale>(); }
+
+    String get_name() const override { return name; }
+
+    bool is_variadic() const override { return true; }
+
+    size_t get_number_of_arguments() const override { return 0; }
+
+    DataTypes get_variadic_argument_types_impl() const override {
+        if constexpr (ArgNum == 1) {
+            return {std::make_shared<typename PrimitiveTypeTraits<InputType>::DataType>()};
+        }
+        return {std::make_shared<typename PrimitiveTypeTraits<InputType>::DataType>(),
+                std::make_shared<DataTypeInt32>()};
+    }
+
+    DataTypePtr get_return_type_impl(const DataTypes& arguments) const override {
+        return std::make_shared<DataTypeFloat64>();
+    }
+
+    Status execute_impl(FunctionContext* context, Block& block, const ColumnNumbers& arguments,
+                        uint32_t result, size_t input_rows_count) const override {
+        const auto& input_column = block.get_by_position(arguments[0]).column;
+        const bool input_is_const = is_column_const(*input_column);
+        const IColumn* input_data =
+                input_is_const ? &assert_cast<const ColumnConst&>(*input_column).get_data_column()
+                               : input_column.get();
+        const auto* values = check_and_get_column<ColumnVector<InputType>>(input_data);
+        if (values == nullptr) {
+            return Status::InvalidArgument("Invalid first argument type {} for function {}",
+                                           block.get_by_position(arguments[0]).type->get_name(),
+                                           name);
+        }
+
+        const ColumnInt32* scales = nullptr;
+        bool scale_is_const = false;
+        if constexpr (ArgNum == 2) {
+            const auto& scale_column = block.get_by_position(arguments[1]).column;
+            scale_is_const = is_column_const(*scale_column);
+            const IColumn* scale_data =
+                    scale_is_const
+                            ? &assert_cast<const ColumnConst&>(*scale_column).get_data_column()
+                            : scale_column.get();
+            scales = check_and_get_column<ColumnInt32>(scale_data);
+            if (scales == nullptr) {
+                return Status::InvalidArgument("Invalid second argument type {} for function {}",
+                                               block.get_by_position(arguments[1]).type->get_name(),
+                                               name);
+            }
+        }
+
+        auto result_column = ColumnFloat64::create();
+        auto& result_data = result_column->get_data();
+        result_data.resize(input_rows_count);
+        const auto& input_values = values->get_data();
+        for (size_t i = 0; i < input_rows_count; ++i) {
+            Int32 scale = 0;
+            if constexpr (ArgNum == 2) {
+                scale = scales->get_data()[scale_is_const ? 0 : i];
+            }
+            result_data[i] = apply(input_values[input_is_const ? 0 : i], scale);
+        }
+
+        block.replace_by_position(result, std::move(result_column));
+        return Status::OK();
+    }
+
+private:
+    static double apply(InputCppType input, Int32 scale) {
+        double value = static_cast<double>(input);
+        scale = std::clamp(scale, -30, 30);
+        if (scale == 0) {
+            if constexpr (Mode == RoundingMode::Round) {
+                return std::nearbyint(value);
+            }
+            return std::trunc(value);
+        }
+        double factor = std::pow(10.0, std::abs(scale));
+        if constexpr (Mode == RoundingMode::Round) {
+            return scale > 0 ? std::nearbyint(value * factor) / factor
+                             : std::nearbyint(value / factor) * factor;
+        }
+        return scale > 0 ? std::trunc(value * factor) / factor
+                         : std::trunc(value / factor) * factor;
+    }
+};
+
+template <PrimitiveType InputType, int ArgNum>
+using FunctionRoundInteger =
+        FunctionIntegerScale<InputType, ArgNum, RoundingMode::Round, RoundName>;
+
+template <PrimitiveType InputType, int ArgNum>
+using FunctionTruncateInteger =
+        FunctionIntegerScale<InputType, ArgNum, RoundingMode::Trunc, TruncateName>;
+
+template <PrimitiveType InputType, int ArgNum>
+using FunctionRoundReal = FunctionRealScale<InputType, ArgNum, RoundingMode::Round, RoundName>;
+
+template <PrimitiveType InputType, int ArgNum>
+using FunctionTruncateReal =
+        FunctionRealScale<InputType, ArgNum, RoundingMode::Trunc, TruncateName>;
 
 /// round(double,int32)-->double
 /// key_str:roundFloat64Int32

@@ -52,7 +52,8 @@ public abstract class Type {
     public static final long TYPE_DESCRIPTOR_DEFAULT = 0L;
     public static final long TYPE_DESCRIPTOR_CODE_MASK = 0xFFFFL;
     public static final long TYPE_DESCRIPTOR_UNSIGNED_MASK = 1L << 16;
-    public static final long TYPE_DESCRIPTOR_SUPPORTED_MASK = TYPE_DESCRIPTOR_UNSIGNED_MASK;
+    public static final long TYPE_DESCRIPTOR_SUPPORTED_MASK =
+            TYPE_DESCRIPTOR_CODE_MASK | TYPE_DESCRIPTOR_UNSIGNED_MASK;
 
     @SerializedName(value = "typeDescriptor")
     protected long typeDescriptor = TYPE_DESCRIPTOR_DEFAULT;
@@ -60,6 +61,18 @@ public abstract class Type {
     public long getTypeDescriptor() {
         validateTypeDescriptor(typeDescriptor);
         return typeDescriptor;
+    }
+
+    /**
+     * Return the optional MySQL type code used only when serializing a result column.
+     * Code zero means that the writer should derive the wire type from the carrier type.
+     */
+    public int getWriteTypeCode() {
+        return (int) (getTypeDescriptor() & TYPE_DESCRIPTOR_CODE_MASK);
+    }
+
+    public boolean hasWriteTypeOverride() {
+        return getWriteTypeCode() != 0;
     }
 
     protected void setTypeDescriptor(long typeDescriptor) {

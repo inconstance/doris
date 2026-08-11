@@ -147,7 +147,8 @@ struct TScalarType {
     5: optional i32 variant_max_subcolumns_count = 0;
     6: optional bool variant_enable_doc_mode = false;
 
-    // Extensible type descriptor. Bit 16 marks UNSIGNED; all other bits are reserved.
+    // Extensible attributes orthogonal to the carrier type. Bits 0-15 optionally contain the
+    // MySQL result write type code (zero means no override); bit 16 marks UNSIGNED.
     7: optional i64 type_descriptor
 }
 

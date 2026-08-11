@@ -38,6 +38,7 @@ import org.apache.doris.nereids.exceptions.AnalysisException;
 import org.apache.doris.nereids.glue.LogicalPlanAdapter;
 import org.apache.doris.nereids.glue.translator.PhysicalPlanTranslator;
 import org.apache.doris.nereids.glue.translator.PlanTranslatorContext;
+import org.apache.doris.nereids.glue.translator.ResultTypeDescriptorResolver;
 import org.apache.doris.nereids.hint.DistributeHint;
 import org.apache.doris.nereids.hint.Hint;
 import org.apache.doris.nereids.jobs.executor.Optimizer;
@@ -620,6 +621,9 @@ public class NereidsPlanner extends Planner {
             return;
         }
         PlanFragment root = physicalPlanTranslator.translatePlan(physicalPlan);
+        // Keep result type descriptor support as a fallback for functions whose external result
+        // type cannot be represented by their signatures.
+        // ResultTypeDescriptorResolver.apply(analyzedPlan, physicalPlan, root, sessionVariable);
         if (statementContext.getConnectContext().getExecutor() != null) {
             statementContext.getConnectContext().getExecutor().getSummaryProfile()
                     .setNereidsTranslateTime(TimeUtils.getStartTimeMs());

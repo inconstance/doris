@@ -17,6 +17,7 @@
 
 #include "core/type_descriptor_util.h"
 
+#include <limits>
 #include <type_traits>
 
 #include "common/compiler_util.h"
@@ -70,7 +71,7 @@ Status get_unsigned_maximum(PrimitiveType carrier_type, Int128& maximum) {
 
 Status validate_unsigned_range(const IColumn& input, PrimitiveType carrier_type,
                                uint64_t type_descriptor) {
-    if (type_descriptor == TYPE_DESCRIPTOR_DEFAULT) {
+    if (!is_unsigned_integer_descriptor(type_descriptor)) {
         return Status::OK();
     }
     if (!is_valid_type_descriptor_carrier(type_descriptor, carrier_type)) {
@@ -99,6 +100,35 @@ Status validate_unsigned_range(const IColumn& input, PrimitiveType carrier_type,
         return Status::InvalidArgument("Unsupported unsigned range validation carrier type: {}",
                                        carrier_type);
     }
+}
+
+Status validate_result_write_range(const IColumn& input, PrimitiveType carrier_type,
+                                   uint64_t type_descriptor) {
+    if (get_write_type_code(type_descriptor) != MYSQL_WRITE_TYPE_LONGLONG
+        || carrier_type != TYPE_LARGEINT || is_unsigned_integer_descriptor(type_descriptor)) {
+        return Status::OK();
+    }
+    const IColumn* column = &input;
+    if (const auto* const_column = check_and_get_column<ColumnConst>(column)) {
+        column = &const_column->get_data_column();
+    }
+    const NullMap* null_map = nullptr;
+    if (const auto* nullable = check_and_get_column<ColumnNullable>(column)) {
+        null_map = &nullable->get_null_map_data();
+        column = &nullable->get_nested_column();
+    }
+    const auto& values = assert_cast<const ColumnInt128&>(*column).get_data();
+    for (size_t i = 0; i < values.size(); ++i) {
+        if (null_map != nullptr && (*null_map)[i]) {
+            continue;
+        }
+        if (values[i] < std::numeric_limits<Int64>::min()
+            || values[i] > std::numeric_limits<Int64>::max()) {
+            return Status::Error<ErrorCode::ARITHMETIC_OVERFLOW_ERRROR>(
+                    "BIGINT value is out of range in result serialization");
+        }
+    }
+    return Status::OK();
 }
 
 Status normalize_explicit_unsigned_bigint_cast(ColumnPtr& input, PrimitiveType carrier_type,
@@ -144,6 +174,9 @@ Status validate_unsigned_result_block(
         RETURN_IF_ERROR(validate_unsigned_range(*block.get_by_position(i).column,
                                                 root->data_type()->get_primitive_type(),
                                                 root->type_descriptor()));
+        RETURN_IF_ERROR(validate_result_write_range(*block.get_by_position(i).column,
+                                                    root->data_type()->get_primitive_type(),
+                                                    root->type_descriptor()));
     }
     return Status::OK();
 }

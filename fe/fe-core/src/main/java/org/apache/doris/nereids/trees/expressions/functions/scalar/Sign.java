@@ -23,8 +23,11 @@ import org.apache.doris.nereids.trees.expressions.functions.ExplicitlyCastableSi
 import org.apache.doris.nereids.trees.expressions.functions.PropagateNullable;
 import org.apache.doris.nereids.trees.expressions.shape.UnaryExpression;
 import org.apache.doris.nereids.trees.expressions.visitor.ExpressionVisitor;
+import org.apache.doris.nereids.parser.Dialect;
+import org.apache.doris.nereids.types.BigIntType;
+import org.apache.doris.nereids.types.DecimalV3Type;
 import org.apache.doris.nereids.types.DoubleType;
-import org.apache.doris.nereids.types.TinyIntType;
+import org.apache.doris.qe.ConnectContext;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
@@ -38,7 +41,11 @@ public class Sign extends ScalarFunction
         implements UnaryExpression, ExplicitlyCastableSignature, PropagateNullable {
 
     public static final List<FunctionSignature> SIGNATURES = ImmutableList.of(
-            FunctionSignature.ret(TinyIntType.INSTANCE).args(DoubleType.INSTANCE)
+            FunctionSignature.ret(BigIntType.INSTANCE).args(DoubleType.INSTANCE)
+    );
+
+    private static final List<FunctionSignature> ORACLE_SIGNATURES = ImmutableList.of(
+            FunctionSignature.ret(DecimalV3Type.createDecimalV3Type(1, 0)).args(DecimalV3Type.WILDCARD)
     );
 
     /**
@@ -64,7 +71,13 @@ public class Sign extends ScalarFunction
 
     @Override
     public List<FunctionSignature> getSignatures() {
-        return SIGNATURES;
+        return isOracleDialect() && child().getDataType() instanceof DecimalV3Type
+                ? ORACLE_SIGNATURES : SIGNATURES;
+    }
+
+    private boolean isOracleDialect() {
+        return ConnectContext.get() != null
+                && ConnectContext.get().getSessionVariable().getSqlParseDialect() == Dialect.ORACLE;
     }
 
     @Override

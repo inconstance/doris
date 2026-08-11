@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <boost/iterator/iterator_facade.hpp>
 #include <boost/preprocessor/repetition/repeat.hpp>
+#include <cctype>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -40,12 +41,14 @@
 #include "core/column/column.h"
 #include "core/column/column_const.h"
 #include "core/column/column_nullable.h"
+#include "core/column/column_string.h"
 #include "core/column/column_vector.h"
 #include "core/data_type/data_type.h"
 #include "core/data_type/data_type_date_or_datetime_v2.h"
 #include "core/data_type/data_type_date_time.h"
 #include "core/data_type/data_type_nullable.h"
 #include "core/data_type/data_type_number.h"
+#include "core/data_type/data_type_string.h"
 #include "core/data_type/define_primitive_type.h"
 #include "core/field.h"
 #include "core/pod_array_fwd.h"
@@ -967,6 +970,197 @@ TIME_ROUND_DECLARE(HourCeil, hour_ceil, HOUR, CEIL);
 TIME_ROUND_DECLARE(MinuteCeil, minute_ceil, MINUTE, CEIL);
 TIME_ROUND_DECLARE(SecondCeil, second_ceil, SECOND, CEIL);
 
+enum class OracleDateTimeRoundMode {
+    FLOOR,
+    TRUNC,
+    ROUND,
+    CEIL,
+};
+
+template <OracleDateTimeRoundMode Mode, int ArgNum>
+class FunctionOracleDateTimeRound : public IFunction {
+public:
+    static constexpr auto name = Mode == OracleDateTimeRoundMode::CEIL    ? "ceil"
+                                 : Mode == OracleDateTimeRoundMode::FLOOR ? "floor"
+                                 : Mode == OracleDateTimeRoundMode::TRUNC ? "truncate"
+                                                                          : "round";
+
+    static FunctionPtr create() { return std::make_shared<FunctionOracleDateTimeRound>(); }
+
+    String get_name() const override { return name; }
+
+    size_t get_number_of_arguments() const override { return ArgNum; }
+
+    bool is_variadic() const override { return true; }
+
+    DataTypes get_variadic_argument_types_impl() const override {
+        if constexpr (ArgNum == 1) {
+            return {std::make_shared<DataTypeDateTimeV2>()};
+        }
+        return {std::make_shared<DataTypeDateTimeV2>(), std::make_shared<DataTypeString>()};
+    }
+
+    DataTypePtr get_return_type_impl(const DataTypes& arguments) const override {
+        if (arguments.size() != ArgNum ||
+            remove_nullable(arguments[0])->get_primitive_type() != TYPE_DATETIMEV2) {
+            throw doris::Exception(ErrorCode::INVALID_ARGUMENT,
+                                   "Illegal argument types for Oracle {}(datetime)", name);
+        }
+        if constexpr (ArgNum == 2) {
+            if (!is_string_type(remove_nullable(arguments[1])->get_primitive_type())) {
+                throw doris::Exception(ErrorCode::INVALID_ARGUMENT,
+                                       "Oracle {} datetime format must be a string", name);
+            }
+        }
+        // Oracle CEIL/FLOOR/ROUND/TRUNC(datetime) always return DATE. Oracle DATE is represented by
+        // DATETIMEV2(0) in Doris because it contains fields through second.
+        return std::make_shared<DataTypeDateTimeV2>(0);
+    }
+
+    bool skip_return_type_check() const override { return true; }
+
+    Status execute_impl(FunctionContext* context, Block& block, const ColumnNumbers& arguments,
+                        uint32_t result, size_t input_rows_count) const override {
+        auto date_column =
+                block.get_by_position(arguments[0]).column->convert_to_full_column_if_const();
+        const auto* dates = check_and_get_column<ColumnVector<TYPE_DATETIMEV2>>(date_column.get());
+        if (dates == nullptr) {
+            return Status::InvalidArgument("Invalid first argument type {} for function {}",
+                                           block.get_by_position(arguments[0]).type->get_name(),
+                                           name);
+        }
+
+        ColumnPtr format_column;
+        const ColumnString* formats = nullptr;
+        if constexpr (ArgNum == 2) {
+            format_column =
+                    block.get_by_position(arguments[1]).column->convert_to_full_column_if_const();
+            formats = check_and_get_column<ColumnString>(format_column.get());
+            if (formats == nullptr) {
+                return Status::InvalidArgument("Invalid second argument type {} for function {}",
+                                               block.get_by_position(arguments[1]).type->get_name(),
+                                               name);
+            }
+        }
+
+        auto result_column = ColumnVector<TYPE_DATETIMEV2>::create();
+        auto& result_data = result_column->get_data();
+        result_data.resize(input_rows_count);
+        const auto& date_data = dates->get_data();
+
+        for (size_t i = 0; i < input_rows_count; ++i) {
+            std::string format = "DD";
+            if constexpr (ArgNum == 2) {
+                StringRef format_ref = formats->get_data_at(i);
+                format.assign(format_ref.data, format_ref.size);
+                normalize_format(format);
+            }
+            if (!apply(format, date_data[i], result_data[i], context)) {
+                return Status::InvalidArgument("Unsupported format '{}' for Oracle {}(datetime)",
+                                               format, name);
+            }
+        }
+
+        block.replace_by_position(result, std::move(result_column));
+        return Status::OK();
+    }
+
+private:
+    using DateValueType = typename PrimitiveTypeTraits<TYPE_DATETIMEV2>::CppType;
+
+    enum class Unit {
+        YEAR,
+        QUARTER,
+        MONTH,
+        DAY,
+        HOUR,
+        MINUTE,
+        UNSUPPORTED,
+    };
+
+    static void normalize_format(std::string& format) {
+        auto first = format.find_first_not_of(' ');
+        if (first == std::string::npos) {
+            format.clear();
+            return;
+        }
+        auto last = format.find_last_not_of(' ');
+        format = format.substr(first, last - first + 1);
+        std::transform(format.begin(), format.end(), format.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+    }
+
+    template <typename Flag>
+    static bool apply_unit(DateValueType date, DateValueType& result, FunctionContext* context) {
+        return DateTimeFloorCeilCore<Flag, TYPE_DATETIMEV2>::time_round_reinterpret_two_args(
+                date, 1, result, context);
+    }
+
+    template <typename FloorFlag, typename CeilFlag>
+    static bool apply_mode_unit(DateValueType date, DateValueType& result, FunctionContext* context,
+                                bool round_up = false) {
+        if constexpr (Mode == OracleDateTimeRoundMode::CEIL) {
+            return apply_unit<CeilFlag>(date, result, context);
+        } else if constexpr (Mode == OracleDateTimeRoundMode::ROUND) {
+            return round_up ? apply_unit<CeilFlag>(date, result, context)
+                            : apply_unit<FloorFlag>(date, result, context);
+        } else {
+            static_assert(Mode == OracleDateTimeRoundMode::FLOOR ||
+                          Mode == OracleDateTimeRoundMode::TRUNC);
+            return apply_unit<FloorFlag>(date, result, context);
+        }
+    }
+
+    static Unit parse_unit(const std::string& format) {
+        if (format == "YYYY" || format == "YYY" || format == "YY" || format == "Y" ||
+            format == "YEAR" || format == "SYEAR" || format == "SYYYY") {
+            return Unit::YEAR;
+        }
+        if (format == "Q") {
+            return Unit::QUARTER;
+        }
+        if (format == "MONTH" || format == "MON" || format == "MM" || format == "RM") {
+            return Unit::MONTH;
+        }
+        if (format == "DDD" || format == "DD" || format == "J") {
+            return Unit::DAY;
+        }
+        if (format == "HH" || format == "HH12" || format == "HH24") {
+            return Unit::HOUR;
+        }
+        if (format == "MI") {
+            return Unit::MINUTE;
+        }
+        // D, DAY and DY depend on NLS_TERRITORY. They intentionally remain unsupported until
+        // that session setting is implemented and propagated to the backend.
+        return Unit::UNSUPPORTED;
+    }
+
+    static bool apply(const std::string& format, DateValueType date, DateValueType& result,
+                      FunctionContext* context) {
+        switch (parse_unit(format)) {
+        case Unit::YEAR:
+            return apply_mode_unit<YearFloor, YearCeil>(date, result, context, date.month() >= 7);
+        case Unit::QUARTER:
+            return apply_mode_unit<QuarterFloor, QuarterCeil>(
+                    date, result, context,
+                    (date.month() % 3 == 2 && date.day() >= 16) || date.month() % 3 == 0);
+        case Unit::MONTH:
+            return apply_mode_unit<MonthFloor, MonthCeil>(date, result, context, date.day() >= 16);
+        case Unit::DAY:
+            return apply_mode_unit<DayFloor, DayCeil>(date, result, context, date.hour() >= 12);
+        case Unit::HOUR:
+            return apply_mode_unit<HourFloor, HourCeil>(date, result, context, date.minute() >= 30);
+        case Unit::MINUTE:
+            return apply_mode_unit<MinuteFloor, MinuteCeil>(date, result, context,
+                                                            date.second() >= 30);
+        case Unit::UNSUPPORTED:
+            return false;
+        }
+        return false;
+    }
+};
+
 void register_function_datetime_floor_ceil(SimpleFunctionFactory& factory) {
 #define REGISTER_FUNC_WITH_DELTA_TYPE(IMPL, DELTA)                         \
     factory.register_function<FunctionDateV2OneArg##IMPL##DELTA>();        \
@@ -1001,6 +1195,14 @@ void register_function_datetime_floor_ceil(SimpleFunctionFactory& factory) {
     REGISTER_FUNC(HourCeil);
     REGISTER_FUNC(MinuteCeil);
     REGISTER_FUNC(SecondCeil);
+#define REGISTER_ORACLE_DATETIME_ROUND(MODE)                                                    \
+    factory.register_function<FunctionOracleDateTimeRound<OracleDateTimeRoundMode::MODE, 1>>(); \
+    factory.register_function<FunctionOracleDateTimeRound<OracleDateTimeRoundMode::MODE, 2>>();
+    REGISTER_ORACLE_DATETIME_ROUND(CEIL)
+    REGISTER_ORACLE_DATETIME_ROUND(FLOOR)
+    REGISTER_ORACLE_DATETIME_ROUND(ROUND)
+    REGISTER_ORACLE_DATETIME_ROUND(TRUNC)
+#undef REGISTER_ORACLE_DATETIME_ROUND
 }
 #undef FLOOR
 #undef CEIL

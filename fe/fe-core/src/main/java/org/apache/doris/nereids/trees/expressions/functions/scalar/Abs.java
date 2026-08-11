@@ -18,6 +18,7 @@
 package org.apache.doris.nereids.trees.expressions.functions.scalar;
 
 import org.apache.doris.catalog.FunctionSignature;
+import org.apache.doris.catalog.Type;
 import org.apache.doris.nereids.trees.expressions.Expression;
 import org.apache.doris.nereids.trees.expressions.functions.DecimalSamePrecision;
 import org.apache.doris.nereids.trees.expressions.functions.ExplicitlyCastableSignature;
@@ -33,6 +34,7 @@ import org.apache.doris.nereids.types.IntegerType;
 import org.apache.doris.nereids.types.LargeIntType;
 import org.apache.doris.nereids.types.SmallIntType;
 import org.apache.doris.nereids.types.TinyIntType;
+import org.apache.doris.nereids.types.coercion.IntegralType;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
@@ -47,12 +49,12 @@ public class Abs extends ScalarFunction
 
     public static final List<FunctionSignature> SIGNATURES = ImmutableList.of(
             FunctionSignature.ret(DoubleType.INSTANCE).args(DoubleType.INSTANCE),
-            FunctionSignature.ret(FloatType.INSTANCE).args(FloatType.INSTANCE),
+            FunctionSignature.ret(DoubleType.INSTANCE).args(FloatType.INSTANCE),
             FunctionSignature.ret(LargeIntType.INSTANCE).args(LargeIntType.INSTANCE),
-            FunctionSignature.ret(LargeIntType.INSTANCE).args(BigIntType.INSTANCE),
-            FunctionSignature.ret(IntegerType.INSTANCE).args(SmallIntType.INSTANCE),
+            FunctionSignature.ret(BigIntType.INSTANCE).args(BigIntType.INSTANCE),
             FunctionSignature.ret(BigIntType.INSTANCE).args(IntegerType.INSTANCE),
-            FunctionSignature.ret(SmallIntType.INSTANCE).args(TinyIntType.INSTANCE),
+            FunctionSignature.ret(BigIntType.INSTANCE).args(SmallIntType.INSTANCE),
+            FunctionSignature.ret(BigIntType.INSTANCE).args(TinyIntType.INSTANCE),
             FunctionSignature.ret(DecimalV2Type.SYSTEM_DEFAULT).args(DecimalV2Type.SYSTEM_DEFAULT),
             FunctionSignature.ret(DecimalV3Type.WILDCARD).args(DecimalV3Type.WILDCARD)
     );
@@ -81,6 +83,19 @@ public class Abs extends ScalarFunction
     @Override
     public List<FunctionSignature> getSignatures() {
         return SIGNATURES;
+    }
+
+    @Override
+    public FunctionSignature computeSignature(FunctionSignature signature) {
+        FunctionSignature computedSignature = super.computeSignature(signature);
+        if (!(child().getDataType() instanceof IntegralType)
+                || !((IntegralType) child().getDataType()).isUnsigned()
+                || !(computedSignature.returnType instanceof IntegralType)) {
+            return computedSignature;
+        }
+        IntegralType returnType = (IntegralType) computedSignature.returnType;
+        return computedSignature.withReturnType(
+                returnType.withTypeDescriptor(Type.TYPE_DESCRIPTOR_UNSIGNED_MASK));
     }
 
     @Override

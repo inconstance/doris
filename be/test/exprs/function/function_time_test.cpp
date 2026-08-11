@@ -134,7 +134,7 @@ TEST(VTimestampFunctionsTest, century_v2_test) {
     }
 
     {
-        InputTypeSet input_types = {PrimitiveType::TYPE_DATETIMEV2};
+        InputTypeSet input_types = {{PrimitiveType::TYPE_DATETIMEV2, 6}};
 
         DataSet data_set = {{{std::string("2024-01-01 12:34:56")}, int16_t {21}},
                             {{std::string("2000-01-01 12:34:56.789")}, int16_t {20}},
@@ -811,7 +811,7 @@ TEST(VTimestampFunctionsTest, date_format_v2_test) {
         static_cast<void>(check_function<DataTypeString, true>(func_name, input_types, data_set));
     }
     {
-        InputTypeSet input_types = {PrimitiveType::TYPE_DATETIMEV2,
+        InputTypeSet input_types = {{PrimitiveType::TYPE_DATETIMEV2, 6},
                                     Consted {PrimitiveType::TYPE_VARCHAR}};
         DataSet data_set = {{{std::string("2009-10-04 22:23:00"), std::string("%W %M %Y")},
                              std::string("Sunday October 2009")}};
@@ -1496,6 +1496,27 @@ TEST(VTimestampFunctionsTest, datetrunc_test) {
                              std::string("2022-01-01 00:00:00")}};
         static_cast<void>(
                 check_function<DataTypeDateTimeV2, true>(func_name, input_types, data_set));
+    }
+}
+
+TEST(VTimestampFunctionsTest, oracle_datetime_ceil_test) {
+    {
+        InputTypeSet input_types = {PrimitiveType::TYPE_DATETIMEV2};
+        DataSet data_set = {
+                {{std::string("2022-10-08 11:44:23.123456")}, std::string("2022-10-09 00:00:00")},
+                {{std::string("2022-10-08 00:00:00.000000")}, std::string("2022-10-08 00:00:00")}};
+
+        static_cast<void>(check_function<DataTypeDateTimeV2, true>("ceil", input_types, data_set));
+    }
+    {
+        InputTypeSet input_types = {PrimitiveType::TYPE_DATETIMEV2,
+                                    Consted {PrimitiveType::TYPE_VARCHAR}};
+        DataSet data_set = {{{std::string("2022-10-08 11:44:23.123456"), std::string("MI")},
+                             std::string("2022-10-08 11:45:00")},
+                            {{std::string("2022-10-08 11:44:00.000000"), std::string("MI")},
+                             std::string("2022-10-08 11:44:00")}};
+
+        static_cast<void>(check_function<DataTypeDateTimeV2, true>("ceil", input_types, data_set));
     }
 }
 

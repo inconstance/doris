@@ -215,6 +215,7 @@ Status VMysqlResultWriter::_write_one_block(RuntimeState* state, Block& block) {
                 for (size_t col_idx = 0; col_idx < num_cols; ++col_idx) {
                     const auto col_index = index_check_const(row_idx, arguments[col_idx].is_const);
                     const auto* column = arguments[col_idx].column;
+                    options.type_descriptor = arguments[col_idx].type_descriptor;
                     if (write_to_text(arguments[col_idx].serde, column, write_buffer, col_index,
                                       options)) {
                         write_buffer.commit();

@@ -18,6 +18,7 @@
 package org.apache.doris.mysql;
 
 import org.apache.doris.catalog.Column;
+import org.apache.doris.catalog.MysqlColType;
 import org.apache.doris.catalog.PrimitiveType;
 import org.apache.doris.catalog.ScalarType;
 import org.apache.doris.catalog.Type;
@@ -188,7 +189,7 @@ public class MysqlSerializer {
         // Column length: four byte integer
         writeInt4(getMysqlTypeLength(type));
         // Column type: one byte integer
-        writeInt1(getMysqlPrimitiveType(type).toMysqlType().getCode());
+        writeInt1(getEffectiveMysqlType(type).getCode());
         // Flags: two byte integer
         writeInt2(getMysqlFlags(type));
         // Decimals: one byte integer
@@ -217,7 +218,7 @@ public class MysqlSerializer {
         // TODO(zhaochun): fix Column length: four byte integer
         writeInt4(getMysqlTypeLength(column.getType()));
         // Column type: one byte integer
-        writeInt1(column.getDataType().toMysqlType().getCode());
+        writeInt1(getEffectiveMysqlType(column.getType()).getCode());
         // Flags: two byte integer
         writeInt2(getMysqlFlags(column.getType()));
         // Decimals: one byte integer
@@ -252,7 +253,7 @@ public class MysqlSerializer {
         // Column length: four byte integer
         writeInt4(getMysqlTypeLength(type));
         // Column type: one byte integer
-        writeInt1(getMysqlPrimitiveType(type).toMysqlType().getCode());
+        writeInt1(getEffectiveMysqlType(type).getCode());
         // Flags: two byte integer
         writeInt2(getMysqlFlags(type));
         // Decimals: one byte integer
@@ -270,6 +271,43 @@ public class MysqlSerializer {
      * @return
      */
     private int getMysqlTypeLength(Type type) {
+        if (type.hasWriteTypeOverride()) {
+            switch (getEffectiveMysqlType(type)) {
+                case MYSQL_TYPE_TINY:
+                    return 4;
+                case MYSQL_TYPE_SHORT:
+                    return 6;
+                case MYSQL_TYPE_LONG:
+                    return 11;
+                case MYSQL_TYPE_LONGLONG:
+                    return 20;
+                case MYSQL_TYPE_FLOAT:
+                    return 12;
+                case MYSQL_TYPE_DOUBLE:
+                    return 22;
+                case MYSQL_TYPE_NEWDECIMAL:
+                    if (type.isDecimalV2() || type.isDecimalV3()) {
+                        ScalarType decimalType = (ScalarType) type;
+                        return decimalType.decimalPrecision() + (decimalType.decimalScale() > 0 ? 2 : 1);
+                    }
+                    switch (type.getPrimitiveType()) {
+                        case TINYINT:
+                            return 4;
+                        case SMALLINT:
+                            return 6;
+                        case INT:
+                            return 11;
+                        case BIGINT:
+                            return 20;
+                        case LARGEINT:
+                            return 40;
+                        default:
+                            return 255;
+                    }
+                default:
+                    break;
+            }
+        }
         if (type instanceof ScalarType && ((ScalarType) type).isUnsignedInteger()) {
             return getUnsignedMysqlTypeLength((ScalarType) type);
         }
@@ -340,6 +378,18 @@ public class MysqlSerializer {
                 : type.getPrimitiveType();
     }
 
+    private MysqlColType getEffectiveMysqlType(Type type) {
+        if (type.hasWriteTypeOverride()) {
+            MysqlColType writeType = MysqlColType.fromCode(type.getWriteTypeCode());
+            if (writeType == null || writeType == MysqlColType.MYSQL_TYPE_DECIMAL) {
+                throw new IllegalArgumentException("Unsupported MySQL result write type code: "
+                        + type.getWriteTypeCode());
+            }
+            return writeType;
+        }
+        return getMysqlPrimitiveType(type).toMysqlType();
+    }
+
     private int getUnsignedMysqlTypeLength(ScalarType type) {
         switch (type.getUnsignedOriginType()) {
             case TINYINT:
@@ -357,6 +407,18 @@ public class MysqlSerializer {
 
     // this is used for decimal scale
     public int getMysqlDecimals(Type type) {
+        if (type.hasWriteTypeOverride()) {
+            switch (getEffectiveMysqlType(type)) {
+                case MYSQL_TYPE_FLOAT:
+                case MYSQL_TYPE_DOUBLE:
+                    return 31;
+                case MYSQL_TYPE_NEWDECIMAL:
+                    return (type.isDecimalV2() || type.isDecimalV3())
+                            ? ((ScalarType) type).decimalScale() : 0;
+                default:
+                    return 0;
+            }
+        }
         switch (type.getPrimitiveType()) {
             case DECIMALV2:
             case DECIMAL32:

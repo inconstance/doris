@@ -21,6 +21,7 @@
 
 #include <bit>
 #include <cstdint>
+#include <limits>
 
 #include "common/exception.h"
 #include "common/status.h"
@@ -540,6 +541,66 @@ Status DataTypeNumberSerDe<T>::write_column_to_mysql_binary(const IColumn& colum
     int buf_ret = 0;
     auto& data = assert_cast<const ColumnType&>(column).get_data();
     const auto col_index = index_check_const(row_idx, col_const);
+    const auto write_type = get_write_type_code(options.type_descriptor);
+    if (write_type != 0) {
+        if (write_type == MYSQL_WRITE_TYPE_LONGLONG) {
+            if constexpr (T == TYPE_TINYINT || T == TYPE_SMALLINT || T == TYPE_INT ||
+                          T == TYPE_BIGINT) {
+                buf_ret = result.push_bigint(static_cast<Int64>(data[col_index]));
+            } else if constexpr (T == TYPE_LARGEINT) {
+                const auto value = data[col_index];
+                if (is_unsigned_integer_descriptor(options.type_descriptor)) {
+                    if (value < 0 || static_cast<UInt128>(value) >
+                                             std::numeric_limits<UInt64>::max()) {
+                        return Status::Error<ErrorCode::ARITHMETIC_OVERFLOW_ERRROR>(
+                                "Integer value is out of range for MySQL BIGINT UNSIGNED");
+                    }
+                    buf_ret = result.push_unsigned_bigint(static_cast<UInt64>(value));
+                } else {
+                    if (value < std::numeric_limits<Int64>::min() ||
+                        value > std::numeric_limits<Int64>::max()) {
+                        return Status::Error<ErrorCode::ARITHMETIC_OVERFLOW_ERRROR>(
+                                "BIGINT value is out of range in result serialization");
+                    }
+                    buf_ret = result.push_bigint(static_cast<Int64>(value));
+                }
+            } else {
+                return Status::InvalidArgument(
+                        "MySQL LONGLONG write type is incompatible with carrier {}", T);
+            }
+        } else if (write_type == MYSQL_WRITE_TYPE_DOUBLE) {
+            if constexpr (T == TYPE_FLOAT || T == TYPE_DOUBLE) {
+                buf_ret = result.push_double(static_cast<double>(data[col_index]));
+            } else {
+                return Status::InvalidArgument(
+                        "MySQL DOUBLE write type is incompatible with carrier {}", T);
+            }
+        } else if (write_type == MYSQL_WRITE_TYPE_FLOAT) {
+            if constexpr (T == TYPE_FLOAT) {
+                buf_ret = result.push_float(data[col_index]);
+            } else {
+                return Status::InvalidArgument(
+                        "MySQL FLOAT write type is incompatible with carrier {}", T);
+            }
+        } else if (write_type == MYSQL_WRITE_TYPE_NEWDECIMAL) {
+            if constexpr (T == TYPE_TINYINT || T == TYPE_SMALLINT || T == TYPE_INT ||
+                          T == TYPE_BIGINT) {
+                const auto value = std::to_string(data[col_index]);
+                buf_ret = result.push_string(value.data(), value.size());
+            } else if constexpr (T == TYPE_LARGEINT) {
+                const auto value = LargeIntValue::to_string(data[col_index]);
+                buf_ret = result.push_string(value.data(), value.size());
+            } else {
+                return Status::InvalidArgument(
+                        "MySQL NEWDECIMAL write type is incompatible with carrier {}", T);
+            }
+        } else {
+            return Status::InvalidArgument("Unsupported MySQL result write type code {}",
+                                           write_type);
+        }
+        return buf_ret == 0 ? Status::OK()
+                            : Status::InternalError("pack mysql buffer failed.");
+    }
     if constexpr (T == TYPE_SMALLINT || T == TYPE_INT || T == TYPE_BIGINT || T == TYPE_LARGEINT) {
         if (is_unsigned_integer_descriptor(options.type_descriptor)) {
             if constexpr (T == TYPE_SMALLINT) {
@@ -593,6 +654,22 @@ Status DataTypeNumberSerDe<T>::write_column_to_mysql_binary(const IColumn& colum
     } else {
         return Status::OK();
     }
+}
+
+template <PrimitiveType T>
+bool DataTypeNumberSerDe<T>::write_column_to_mysql_text(const IColumn& column, BufferWritable& bw,
+                                                        int64_t row_idx,
+                                                        const FormatOptions& options) const {
+    const auto& data = assert_cast<const ColumnType&, TypeCheckOnRelease::DISABLE>(column).get_data();
+    if constexpr (T == TYPE_FLOAT) {
+        if (get_write_type_code(options.type_descriptor) == MYSQL_WRITE_TYPE_DOUBLE) {
+            value_to_string<TYPE_DOUBLE>(static_cast<double>(data[row_idx]), bw, get_scale(),
+                                         options);
+            return true;
+        }
+    }
+    to_string(column, row_idx, bw, options);
+    return true;
 }
 
 #define WRITE_INTEGRAL_COLUMN_TO_ORC(ORC_TYPE)                    \

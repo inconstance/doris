@@ -17,6 +17,7 @@
 
 package org.apache.doris.mysql;
 
+import org.apache.doris.catalog.MysqlColType;
 import org.apache.doris.catalog.PrimitiveType;
 import org.apache.doris.catalog.ScalarType;
 import org.apache.doris.catalog.Type;
@@ -107,5 +108,38 @@ public class MysqlColDefTest {
         MysqlProto.readInt2(buf);
         MysqlProto.readInt4(buf);
         Assert.assertEquals(PrimitiveType.DECIMAL128.toMysqlType().getCode(), MysqlProto.readInt1(buf));
+    }
+
+    @Test
+    public void testResultWriteTypeOverrideMetadata() {
+        ScalarType writeBigint = Type.SMALLINT.withTypeDescriptor(
+                MysqlColType.MYSQL_TYPE_LONGLONG.getCode());
+        MysqlSerializer serializer = MysqlSerializer.newInstance();
+        serializer.writeField("abs_i8", writeBigint);
+        ByteBuffer buf = serializer.toByteBuffer();
+        for (int i = 0; i < 6; i++) {
+            MysqlProto.readLenEncodedString(buf);
+        }
+        Assert.assertEquals(0x0c, MysqlProto.readVInt(buf));
+        MysqlProto.readInt2(buf);
+        Assert.assertEquals(20, MysqlProto.readInt4(buf));
+        Assert.assertEquals(MysqlColType.MYSQL_TYPE_LONGLONG.getCode(), MysqlProto.readInt1(buf));
+        Assert.assertEquals(0, MysqlProto.readInt2(buf));
+        Assert.assertEquals(0, MysqlProto.readInt1(buf));
+
+        ScalarType writeDouble = Type.FLOAT.withTypeDescriptor(
+                MysqlColType.MYSQL_TYPE_DOUBLE.getCode());
+        serializer.reset();
+        serializer.writeField("abs_f", writeDouble);
+        buf = serializer.toByteBuffer();
+        for (int i = 0; i < 6; i++) {
+            MysqlProto.readLenEncodedString(buf);
+        }
+        MysqlProto.readVInt(buf);
+        MysqlProto.readInt2(buf);
+        Assert.assertEquals(22, MysqlProto.readInt4(buf));
+        Assert.assertEquals(MysqlColType.MYSQL_TYPE_DOUBLE.getCode(), MysqlProto.readInt1(buf));
+        MysqlProto.readInt2(buf);
+        Assert.assertEquals(31, MysqlProto.readInt1(buf));
     }
 }

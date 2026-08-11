@@ -245,6 +245,23 @@ public class ScalarType extends Type {
         return result;
     }
 
+    /** Return a copy with orthogonal descriptor attributes replaced. */
+    public ScalarType withTypeDescriptor(long descriptor) {
+        ScalarType result = new ScalarType(type);
+        result.len = len;
+        result.precision = precision;
+        result.scale = scale;
+        result.precisionStr = precisionStr;
+        result.scaleStr = scaleStr;
+        result.lenStr = lenStr;
+        result.byteSize = byteSize;
+        result.setTypeDescriptor(descriptor);
+        if (result.isUnsignedInteger()) {
+            result.getUnsignedOriginType();
+        }
+        return result;
+    }
+
     public static ScalarType createType(String type) {
         switch (type) {
             case "INVALID_TYPE":
@@ -827,7 +844,7 @@ public class ScalarType extends Type {
     }
 
     public boolean isUnsignedInteger() {
-        return getTypeDescriptor() == TYPE_DESCRIPTOR_UNSIGNED_MASK;
+        return (getTypeDescriptor() & TYPE_DESCRIPTOR_UNSIGNED_MASK) != 0;
     }
 
     public PrimitiveType getUnsignedOriginType() {
@@ -964,9 +981,6 @@ public class ScalarType extends Type {
             return false;
         }
         ScalarType scalarType = (ScalarType) t;
-        if (typeDescriptor != scalarType.typeDescriptor) {
-            return false;
-        }
         if (type.isStringType() && scalarType.isStringType()) {
             return true;
         }
@@ -1008,9 +1022,6 @@ public class ScalarType extends Type {
         if (type != other.type) {
             return false;
         }
-        if (typeDescriptor != other.typeDescriptor) {
-            return false;
-        }
         if (type == PrimitiveType.CHAR) {
             return len == other.len;
         }
@@ -1048,7 +1059,6 @@ public class ScalarType extends Type {
     public int hashCode() {
         int result = 0;
         result = 31 * result + Objects.hashCode(type);
-        result = 31 * result + Long.hashCode(typeDescriptor);
         result = 31 * result + precision;
         result = 31 * result + scale;
         return result;

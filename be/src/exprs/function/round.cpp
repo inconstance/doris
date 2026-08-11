@@ -24,16 +24,61 @@ namespace doris {
 // We split round funcs from register_function_math() in math.cpp to here,
 // so that to speed up compile time and make code more readable.
 void register_function_round(SimpleFunctionFactory& factory) {
-#define REGISTER_ROUND_FUNCTIONS(IMPL)                                                           \
-    factory.register_function<                                                                   \
-            FunctionRounding<IMPL<TruncateName>, RoundingMode::Trunc, TieBreakingMode::Auto>>(); \
-    factory.register_function<                                                                   \
-            FunctionRounding<IMPL<FloorName>, RoundingMode::Floor, TieBreakingMode::Auto>>();    \
-    factory.register_function<                                                                   \
-            FunctionRounding<IMPL<RoundName>, RoundingMode::Round, TieBreakingMode::Auto>>();    \
-    factory.register_function<                                                                   \
-            FunctionRounding<IMPL<CeilName>, RoundingMode::Ceil, TieBreakingMode::Auto>>();      \
-    factory.register_function<FunctionRounding<IMPL<RoundBankersName>, RoundingMode::Round,      \
+#define REGISTER_CEIL_NUMBER(TYPE) factory.register_function<FunctionCeilNumber<TYPE>>();
+    REGISTER_CEIL_NUMBER(TYPE_BOOLEAN)
+    REGISTER_CEIL_NUMBER(TYPE_TINYINT)
+    REGISTER_CEIL_NUMBER(TYPE_SMALLINT)
+    REGISTER_CEIL_NUMBER(TYPE_INT)
+    REGISTER_CEIL_NUMBER(TYPE_BIGINT)
+    REGISTER_CEIL_NUMBER(TYPE_LARGEINT)
+    REGISTER_CEIL_NUMBER(TYPE_FLOAT)
+#undef REGISTER_CEIL_NUMBER
+
+#define REGISTER_FLOOR_NUMBER(TYPE) factory.register_function<FunctionFloorNumber<TYPE>>();
+    REGISTER_FLOOR_NUMBER(TYPE_TINYINT)
+    REGISTER_FLOOR_NUMBER(TYPE_SMALLINT)
+    REGISTER_FLOOR_NUMBER(TYPE_INT)
+    REGISTER_FLOOR_NUMBER(TYPE_BIGINT)
+    REGISTER_FLOOR_NUMBER(TYPE_LARGEINT)
+    REGISTER_FLOOR_NUMBER(TYPE_FLOAT)
+#undef REGISTER_FLOOR_NUMBER
+
+#define REGISTER_ROUND_INTEGER(TYPE)                            \
+    factory.register_function<FunctionRoundInteger<TYPE, 1>>(); \
+    factory.register_function<FunctionRoundInteger<TYPE, 2>>();
+    REGISTER_ROUND_INTEGER(TYPE_TINYINT)
+    REGISTER_ROUND_INTEGER(TYPE_SMALLINT)
+    REGISTER_ROUND_INTEGER(TYPE_INT)
+    REGISTER_ROUND_INTEGER(TYPE_BIGINT)
+    REGISTER_ROUND_INTEGER(TYPE_LARGEINT)
+#undef REGISTER_ROUND_INTEGER
+
+    factory.register_function<FunctionRoundReal<TYPE_FLOAT, 1>>();
+    factory.register_function<FunctionRoundReal<TYPE_FLOAT, 2>>();
+    factory.register_function<FunctionRoundReal<TYPE_DOUBLE, 1>>();
+    factory.register_function<FunctionRoundReal<TYPE_DOUBLE, 2>>();
+
+    factory.register_function<FunctionTruncateReal<TYPE_FLOAT, 1>>();
+    factory.register_function<FunctionTruncateReal<TYPE_FLOAT, 2>>();
+    factory.register_function<FunctionTruncateReal<TYPE_DOUBLE, 1>>();
+    factory.register_function<FunctionTruncateReal<TYPE_DOUBLE, 2>>();
+
+#define REGISTER_TRUNCATE_INTEGER(TYPE)                            \
+    factory.register_function<FunctionTruncateInteger<TYPE, 1>>(); \
+    factory.register_function<FunctionTruncateInteger<TYPE, 2>>();
+    REGISTER_TRUNCATE_INTEGER(TYPE_TINYINT)
+    REGISTER_TRUNCATE_INTEGER(TYPE_SMALLINT)
+    REGISTER_TRUNCATE_INTEGER(TYPE_INT)
+    REGISTER_TRUNCATE_INTEGER(TYPE_BIGINT)
+    REGISTER_TRUNCATE_INTEGER(TYPE_LARGEINT)
+#undef REGISTER_TRUNCATE_INTEGER
+
+#define REGISTER_ROUND_FUNCTIONS(IMPL)                                                        \
+    factory.register_function<                                                                \
+            FunctionRounding<IMPL<FloorName>, RoundingMode::Floor, TieBreakingMode::Auto>>(); \
+    factory.register_function<                                                                \
+            FunctionRounding<IMPL<CeilName>, RoundingMode::Ceil, TieBreakingMode::Auto>>();   \
+    factory.register_function<FunctionRounding<IMPL<RoundBankersName>, RoundingMode::Round,   \
                                                TieBreakingMode::Bankers>>();
     REGISTER_ROUND_FUNCTIONS(DoubleRoundOneImpl)
     REGISTER_ROUND_FUNCTIONS(DoubleRoundTwoImpl)
@@ -65,6 +110,7 @@ void register_function_round(SimpleFunctionFactory& factory) {
     factory.register_alias("ceil", "ceiling");
     factory.register_alias("floor", "dfloor");
     factory.register_alias("round", "dround");
+    factory.register_alias("truncate", "trunc");
 }
 
 } // namespace doris

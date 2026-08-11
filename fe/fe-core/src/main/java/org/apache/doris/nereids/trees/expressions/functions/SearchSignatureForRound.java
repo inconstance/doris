@@ -32,6 +32,12 @@ public interface SearchSignatureForRound extends ExplicitlyCastableSignature {
     default FunctionSignature searchSignature(List<FunctionSignature> signatures) {
         List<Expression> arguments = getArguments();
         if (arguments.get(0).getDataType().isFloatLikeType()) {
+            for (FunctionSignature signature : signatures) {
+                if (signature.argumentsTypes.size() == arguments.size()
+                        && signature.getArgType(0).equals(arguments.get(0).getDataType())) {
+                    return signature;
+                }
+            }
             if (arguments.size() == 1) {
                 return FunctionSignature.ret(DoubleType.INSTANCE).args(DoubleType.INSTANCE);
             } else if (arguments.size() == 2) {

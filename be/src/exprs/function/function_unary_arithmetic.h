@@ -62,9 +62,9 @@ class FunctionUnaryArithmetic : public IFunction {
     static constexpr bool allow_decimal = std::string_view(Name::name) == "abs" ||
                                           std::string_view(Name::name) == "negative" ||
                                           std::string_view(Name::name) == "positive";
-    static constexpr bool not_variadic =
-            std::string_view(Name::name) == "degree" || std::string_view(Name::name) == "radian" ||
-            std::string_view(Name::name) == "sign" || std::string_view(Name::name) == "signbit";
+    static constexpr bool not_variadic = std::string_view(Name::name) == "degree" ||
+                                         std::string_view(Name::name) == "radian" ||
+                                         std::string_view(Name::name) == "signbit";
 
     template <typename F>
     static bool cast_type(const IDataType* type, F&& f) {

@@ -33,10 +33,21 @@ class VExprContext;
 inline constexpr uint64_t TYPE_DESCRIPTOR_DEFAULT = 0;
 inline constexpr uint64_t TYPE_DESCRIPTOR_CODE_MASK = 0xFFFFULL;
 inline constexpr uint64_t TYPE_DESCRIPTOR_UNSIGNED_MASK = 1ULL << 16;
-inline constexpr uint64_t TYPE_DESCRIPTOR_SUPPORTED_MASK = TYPE_DESCRIPTOR_UNSIGNED_MASK;
+inline constexpr uint64_t TYPE_DESCRIPTOR_SUPPORTED_MASK =
+        TYPE_DESCRIPTOR_CODE_MASK | TYPE_DESCRIPTOR_UNSIGNED_MASK;
+
+inline uint16_t get_write_type_code(uint64_t descriptor) {
+    return static_cast<uint16_t>(descriptor & TYPE_DESCRIPTOR_CODE_MASK);
+}
+
+// MySQL enum_field_types values used by result serialization overrides.
+inline constexpr uint16_t MYSQL_WRITE_TYPE_FLOAT = 4;
+inline constexpr uint16_t MYSQL_WRITE_TYPE_DOUBLE = 5;
+inline constexpr uint16_t MYSQL_WRITE_TYPE_LONGLONG = 8;
+inline constexpr uint16_t MYSQL_WRITE_TYPE_NEWDECIMAL = 246;
 
 inline bool is_unsigned_integer_descriptor(uint64_t descriptor) {
-    return descriptor == TYPE_DESCRIPTOR_UNSIGNED_MASK;
+    return (descriptor & TYPE_DESCRIPTOR_UNSIGNED_MASK) != 0;
 }
 
 inline bool is_unsigned_bigint_descriptor(uint64_t descriptor, PrimitiveType carrier) {
@@ -45,7 +56,7 @@ inline bool is_unsigned_bigint_descriptor(uint64_t descriptor, PrimitiveType car
 
 inline bool is_valid_type_descriptor_carrier(uint64_t descriptor, PrimitiveType carrier) {
     if ((descriptor & ~TYPE_DESCRIPTOR_SUPPORTED_MASK) != 0) return false;
-    if (!is_unsigned_integer_descriptor(descriptor)) return descriptor == TYPE_DESCRIPTOR_DEFAULT;
+    if (!is_unsigned_integer_descriptor(descriptor)) return true;
     return carrier == TYPE_SMALLINT || carrier == TYPE_INT || carrier == TYPE_BIGINT ||
            carrier == TYPE_LARGEINT;
 }

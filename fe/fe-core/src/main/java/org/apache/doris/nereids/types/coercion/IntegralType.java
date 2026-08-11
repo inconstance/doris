@@ -52,7 +52,7 @@ public class IntegralType extends NumericType {
     }
 
     public boolean isUnsigned() {
-        return typeDescriptor == Type.TYPE_DESCRIPTOR_UNSIGNED_MASK;
+        return (typeDescriptor & Type.TYPE_DESCRIPTOR_UNSIGNED_MASK) != 0;
     }
 
     public IntegralType withTypeDescriptor(long typeDescriptor) {

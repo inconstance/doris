@@ -17,6 +17,7 @@
 
 package org.apache.doris.persist;
 
+import org.apache.doris.catalog.MysqlColType;
 import org.apache.doris.catalog.PrimitiveType;
 import org.apache.doris.catalog.ScalarType;
 import org.apache.doris.catalog.Type;
@@ -53,5 +54,21 @@ public class ScalarTypeTest {
         Assert.assertEquals(unsignedInt, restored);
         Assert.assertEquals("int unsigned", restored.toSql());
         Assert.assertEquals(unsignedInt, Type.fromThrift(unsignedInt.toThrift()));
+    }
+
+    @Test
+    public void testTypeDescriptorIsOrthogonalToTypeIdentity() {
+        ScalarType writeBigint = Type.INT.withTypeDescriptor(
+                MysqlColType.MYSQL_TYPE_LONGLONG.getCode());
+        ScalarType unsignedWriteBigint = Type.INT.withTypeDescriptor(
+                Type.TYPE_DESCRIPTOR_UNSIGNED_MASK | MysqlColType.MYSQL_TYPE_LONGLONG.getCode());
+
+        Assert.assertEquals(Type.INT, writeBigint);
+        Assert.assertEquals(Type.INT.hashCode(), writeBigint.hashCode());
+        Assert.assertTrue(Type.INT.matchesType(writeBigint));
+        Assert.assertEquals(MysqlColType.MYSQL_TYPE_LONGLONG.getCode(), writeBigint.getWriteTypeCode());
+        Assert.assertTrue(unsignedWriteBigint.isUnsignedInteger());
+        Assert.assertEquals(MysqlColType.MYSQL_TYPE_LONGLONG.getCode(),
+                unsignedWriteBigint.getWriteTypeCode());
     }
 }

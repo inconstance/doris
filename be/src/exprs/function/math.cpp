@@ -23,9 +23,11 @@
 #include <dlfcn.h>
 
 #include <cmath>
+#include <limits>
 #include <string>
 #include <type_traits>
 
+#include "common/exception.h"
 #include "common/status.h"
 #include "core/column/column.h"
 #include "core/column/column_string.h"
@@ -193,13 +195,13 @@ using FunctionExp = FunctionMathUnary<UnaryFunctionPlain<ExpName, std::exp>>;
 
 template <typename A>
 struct SignImpl {
-    static constexpr PrimitiveType ResultType = TYPE_TINYINT;
+    static constexpr PrimitiveType ResultType = TYPE_BIGINT;
     using DataType = typename PrimitiveTypeTraits<ResultType>::DataType;
-    static inline UInt8 apply(A a) {
+    static inline Int64 apply(A a) {
         if constexpr (IsDecimalNumber<A> || std::is_floating_point_v<A>) {
-            return static_cast<UInt8>(a < A(0) ? -1 : a == A(0) ? 0 : 1);
+            return a < A(0) ? -1 : a == A(0) ? 0 : 1;
         } else if constexpr (IsSignedV<A>) {
-            return static_cast<UInt8>(a < 0 ? -1 : a == 0 ? 0 : 1);
+            return a < 0 ? -1 : a == 0 ? 0 : 1;
         } else {
             static_assert(std::is_same_v<A, void>, "Unsupported type in SignImpl");
         }
@@ -211,9 +213,69 @@ struct NameSign {
 };
 using FunctionSign = FunctionUnaryArithmetic<SignImpl<double>, NameSign, TYPE_DOUBLE>;
 
+template <PrimitiveType InputType>
+class FunctionSignDecimal final : public IFunction {
+    using InputDataType = typename PrimitiveTypeTraits<InputType>::DataType;
+    using InputColumnType = typename PrimitiveTypeTraits<InputType>::ColumnType;
+
+public:
+    static FunctionPtr create() { return std::make_shared<FunctionSignDecimal>(); }
+
+    String get_name() const override { return NameSign::name; }
+
+    size_t get_number_of_arguments() const override { return 1; }
+
+    bool is_variadic() const override { return true; }
+
+    DataTypes get_variadic_argument_types_impl() const override {
+        return {std::make_shared<InputDataType>()};
+    }
+
+    bool use_default_implementation_for_constants() const override { return true; }
+
+    DataTypePtr get_return_type_impl(const DataTypes& arguments) const override {
+        if (!check_and_get_data_type<InputDataType>(arguments[0].get())) {
+            throw doris::Exception(ErrorCode::INVALID_ARGUMENT,
+                                   "Illegal type {} of argument of function sign",
+                                   arguments[0]->get_name());
+        }
+        return std::make_shared<DataTypeDecimal<Decimal32>>(1, 0);
+    }
+
+    Status execute_impl(FunctionContext* context, Block& block, const ColumnNumbers& arguments,
+                        uint32_t result, size_t input_rows_count) const override {
+        const auto* input = check_and_get_column<InputColumnType>(
+                block.get_by_position(arguments[0]).column.get());
+        if (input == nullptr) {
+            return Status::RuntimeError("sign's argument does not match the expected data type");
+        }
+
+        auto result_column = ColumnDecimal<Decimal32>::create(input_rows_count, 0);
+        const auto& input_data = input->get_data();
+        auto& result_data = result_column->get_data();
+        for (size_t i = 0; i < input_rows_count; ++i) {
+            result_data[i] = Decimal32(input_data[i].value < 0    ? -1
+                                       : input_data[i].value == 0 ? 0
+                                                                  : 1);
+        }
+        block.replace_by_position(result, std::move(result_column));
+        return Status::OK();
+    }
+};
+
 template <typename A>
 struct AbsImpl {
-    static constexpr PrimitiveType ResultType = NumberTraits::ResultOfAbs<A>::Type;
+    static constexpr PrimitiveType ResultType = [] {
+        if constexpr (std::is_same_v<A, UInt8> || std::is_same_v<A, Int8> ||
+                      std::is_same_v<A, Int16> || std::is_same_v<A, Int32> ||
+                      std::is_same_v<A, Int64>) {
+            return TYPE_BIGINT;
+        } else if constexpr (std::is_same_v<A, float>) {
+            return TYPE_DOUBLE;
+        } else {
+            return NumberTraits::ResultOfAbs<A>::Type;
+        }
+    }();
     using DataType = typename PrimitiveTypeTraits<ResultType>::DataType;
     static inline typename PrimitiveTypeTraits<ResultType>::CppType apply(A a) {
         if constexpr (IsDecimal128V2<A>) {
@@ -221,6 +283,12 @@ struct AbsImpl {
         } else if constexpr (IsDecimalNumber<A>) {
             return a < A(0) ? A(-a) : a;
         } else if constexpr (IsIntegralV<A>) {
+            if constexpr (std::is_same_v<A, Int64>) {
+                if (a == std::numeric_limits<Int64>::min()) {
+                    throw Exception(ErrorCode::ARITHMETIC_OVERFLOW_ERRROR,
+                                    "BIGINT value is out of range in 'abs' function");
+                }
+            }
             return a < A(0) ? static_cast<typename PrimitiveTypeTraits<ResultType>::CppType>(~a) + 1
                             : a;
         } else if constexpr (std::is_floating_point_v<A>) {
@@ -928,6 +996,10 @@ void register_function_math(SimpleFunctionFactory& factory) {
     factory.register_alias("log10", "dlog10");
     factory.register_function<FunctionPi>();
     factory.register_function<FunctionSign>();
+    factory.register_function<FunctionSignDecimal<TYPE_DECIMAL32>>();
+    factory.register_function<FunctionSignDecimal<TYPE_DECIMAL64>>();
+    factory.register_function<FunctionSignDecimal<TYPE_DECIMAL128I>>();
+    factory.register_function<FunctionSignDecimal<TYPE_DECIMAL256>>();
     factory.register_function<FunctionAbsInt8>();
     factory.register_function<FunctionAbsInt16>();
     factory.register_function<FunctionAbsInt32>();

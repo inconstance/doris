@@ -319,6 +319,32 @@ TEST(MathFunctionTest, ceil_test) {
     static_cast<void>(check_function<DataTypeFloat64, true>(func_name, input_types, data_set));
 }
 
+TEST(MathFunctionTest, ceil_float_returns_double_test) {
+    InputTypeSet input_types = {PrimitiveType::TYPE_FLOAT};
+    DataSet data_set = {{{2.3F}, 3.0}, {{-2.3F}, -2.0}, {{0.0F}, 0.0}};
+
+    static_cast<void>(check_function<DataTypeFloat64, true>("ceil", input_types, data_set));
+}
+
+TEST(MathFunctionTest, ceil_integer_returns_bigint_test) {
+    InputTypeSet input_types = {PrimitiveType::TYPE_INT};
+    DataSet data_set = {
+            {{0}, int64_t {0}},
+            {{std::numeric_limits<int32_t>::min()}, int64_t {std::numeric_limits<int32_t>::min()}},
+            {{std::numeric_limits<int32_t>::max()}, int64_t {std::numeric_limits<int32_t>::max()}}};
+
+    static_cast<void>(check_function<DataTypeInt64, true>("ceil", input_types, data_set));
+}
+
+TEST(MathFunctionTest, ceil_decimal_returns_bigint_test) {
+    InputTypeSet input_types = {{PrimitiveType::TYPE_DECIMAL64, 4, 12}};
+    DataSet data_set = {{{DECIMAL64(1, 2300, 4)}, BIGINT(2)},
+                        {{DECIMAL64(-1, -2300, 4)}, BIGINT(-1)},
+                        {{DECIMAL64(7, 0, 4)}, BIGINT(7)}};
+
+    static_cast<void>(check_function<DataTypeInt64, true>("ceil", input_types, data_set));
+}
+
 TEST(MathFunctionTest, floor_test) {
     std::string func_name = "floor";
 
@@ -359,6 +385,18 @@ TEST(MathFunctionTest, abs_test) {
     std::string func_name = "abs";
 
     {
+        InputTypeSet input_types = {PrimitiveType::TYPE_FLOAT};
+
+        DataSet data_set = {{{Null()}, Null()},
+                            {{FLOAT(-0.0123)}, DOUBLE(0.0123)},
+                            {{FLOAT(90.45)}, DOUBLE(90.45)},
+                            {{FLOAT(0.0)}, DOUBLE(0.0)},
+                            {{FLOAT(-60.0)}, DOUBLE(60.0)}};
+
+        static_cast<void>(check_function<DataTypeFloat64, true>(func_name, input_types, data_set));
+    }
+
+    {
         InputTypeSet input_types = {PrimitiveType::TYPE_DOUBLE};
 
         DataSet data_set = {{{Null()}, Null()},
@@ -380,6 +418,36 @@ TEST(MathFunctionTest, abs_test) {
                             {{INT(-60)}, BIGINT(60)},
                             {{INT(INT_MAX)}, BIGINT(INT_MAX)},
                             {{INT(INT_MIN)}, BIGINT(-1LL * INT_MIN)}};
+
+        static_cast<void>(check_function<DataTypeInt64, true>(func_name, input_types, data_set));
+    }
+
+    {
+        InputTypeSet input_types = {PrimitiveType::TYPE_TINYINT};
+
+        DataSet data_set = {{{TINYINT(-128)}, BIGINT(128)},
+                            {{TINYINT(-1)}, BIGINT(1)},
+                            {{TINYINT(127)}, BIGINT(127)}};
+
+        static_cast<void>(check_function<DataTypeInt64, true>(func_name, input_types, data_set));
+    }
+
+    {
+        InputTypeSet input_types = {PrimitiveType::TYPE_SMALLINT};
+
+        DataSet data_set = {{{SMALLINT(-32768)}, BIGINT(32768)},
+                            {{SMALLINT(-1)}, BIGINT(1)},
+                            {{SMALLINT(32767)}, BIGINT(32767)}};
+
+        static_cast<void>(check_function<DataTypeInt64, true>(func_name, input_types, data_set));
+    }
+
+    {
+        InputTypeSet input_types = {PrimitiveType::TYPE_BIGINT};
+
+        DataSet data_set = {{{BIGINT(-1)}, BIGINT(1)},
+                            {{BIGINT(0)}, BIGINT(0)},
+                            {{BIGINT(INT64_MAX)}, BIGINT(INT64_MAX)}};
 
         static_cast<void>(check_function<DataTypeInt64, true>(func_name, input_types, data_set));
     }

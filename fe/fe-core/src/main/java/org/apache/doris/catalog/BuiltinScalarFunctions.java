@@ -1120,7 +1120,7 @@ public class BuiltinScalarFunctions implements FunctionHelper {
             scalar(Translate.class, "translate"),
             scalar(Trim.class, "trim"),
             scalar(TrimIn.class, "trim_in"),
-            scalar(Truncate.class, "truncate"),
+            scalar(Truncate.class, "trunc", "truncate"),
             scalar(Unhex.class, "unhex"),
             scalar(UnhexNull.class, "unhex_null"),
             scalar(UnixTimestamp.class, "unix_timestamp"),

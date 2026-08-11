@@ -18,14 +18,25 @@
 package org.apache.doris.nereids.trees.expressions.functions.scalar;
 
 import org.apache.doris.catalog.FunctionSignature;
+import org.apache.doris.catalog.Type;
+import org.apache.doris.nereids.parser.Dialect;
 import org.apache.doris.nereids.trees.expressions.Expression;
 import org.apache.doris.nereids.trees.expressions.functions.ComputePrecisionForRound;
 import org.apache.doris.nereids.trees.expressions.functions.PropagateNullable;
 import org.apache.doris.nereids.trees.expressions.functions.SearchSignatureForRound;
 import org.apache.doris.nereids.trees.expressions.visitor.ExpressionVisitor;
+import org.apache.doris.nereids.types.BigIntType;
+import org.apache.doris.nereids.types.DateTimeV2Type;
 import org.apache.doris.nereids.types.DecimalV3Type;
 import org.apache.doris.nereids.types.DoubleType;
+import org.apache.doris.nereids.types.FloatType;
 import org.apache.doris.nereids.types.IntegerType;
+import org.apache.doris.nereids.types.LargeIntType;
+import org.apache.doris.nereids.types.SmallIntType;
+import org.apache.doris.nereids.types.TinyIntType;
+import org.apache.doris.nereids.types.VarcharType;
+import org.apache.doris.nereids.types.coercion.IntegralType;
+import org.apache.doris.qe.ConnectContext;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
@@ -38,11 +49,25 @@ import java.util.List;
 public class Floor extends ScalarFunction
         implements SearchSignatureForRound, PropagateNullable, ComputePrecisionForRound {
 
+    private static final int MYSQL_SIGNED_BIGINT_MAX_DISPLAY_LENGTH = 20;
+
     public static final List<FunctionSignature> SIGNATURES = ImmutableList.of(
             FunctionSignature.ret(DecimalV3Type.WILDCARD).args(DecimalV3Type.WILDCARD),
             FunctionSignature.ret(DecimalV3Type.WILDCARD).args(DecimalV3Type.WILDCARD, IntegerType.INSTANCE),
             FunctionSignature.ret(DoubleType.INSTANCE).args(DoubleType.INSTANCE),
-            FunctionSignature.ret(DoubleType.INSTANCE).args(DoubleType.INSTANCE, IntegerType.INSTANCE)
+            FunctionSignature.ret(DoubleType.INSTANCE).args(DoubleType.INSTANCE, IntegerType.INSTANCE),
+            FunctionSignature.ret(DoubleType.INSTANCE).args(FloatType.INSTANCE),
+            FunctionSignature.ret(LargeIntType.INSTANCE).args(LargeIntType.INSTANCE),
+            FunctionSignature.ret(BigIntType.INSTANCE).args(BigIntType.INSTANCE),
+            FunctionSignature.ret(BigIntType.INSTANCE).args(IntegerType.INSTANCE),
+            FunctionSignature.ret(BigIntType.INSTANCE).args(SmallIntType.INSTANCE),
+            FunctionSignature.ret(BigIntType.INSTANCE).args(TinyIntType.INSTANCE)
+    );
+
+    private static final List<FunctionSignature> ORACLE_DATETIME_SIGNATURES = ImmutableList.of(
+            FunctionSignature.ret(DateTimeV2Type.SYSTEM_DEFAULT).args(DateTimeV2Type.WILDCARD),
+            FunctionSignature.ret(DateTimeV2Type.SYSTEM_DEFAULT)
+                    .args(DateTimeV2Type.WILDCARD, VarcharType.SYSTEM_DEFAULT)
     );
 
     /**
@@ -75,7 +100,53 @@ public class Floor extends ScalarFunction
 
     @Override
     public List<FunctionSignature> getSignatures() {
-        return SIGNATURES;
+        if (!isOracleDialect()) {
+            return SIGNATURES;
+        }
+        return ImmutableList.<FunctionSignature>builder()
+                .addAll(SIGNATURES)
+                .addAll(ORACLE_DATETIME_SIGNATURES)
+                .build();
+    }
+
+    @Override
+    public FunctionSignature computeSignature(FunctionSignature signature) {
+        FunctionSignature computedSignature = super.computeSignature(signature);
+        if (arity() == 1 && getArgumentType(0) instanceof IntegralType
+                && ((IntegralType) getArgumentType(0)).isUnsigned()
+                && computedSignature.returnType instanceof IntegralType) {
+            IntegralType returnType = (IntegralType) computedSignature.returnType;
+            return computedSignature.withReturnType(
+                    returnType.withTypeDescriptor(Type.TYPE_DESCRIPTOR_UNSIGNED_MASK));
+        }
+        return computedSignature;
+    }
+
+    @Override
+    public FunctionSignature computePrecision(FunctionSignature signature) {
+        if (arity() == 1 && signature.getArgType(0) instanceof DecimalV3Type) {
+            DecimalV3Type inputType = DecimalV3Type.forType(getArgumentType(0));
+            FunctionSignature computedSignature = signature.withArgumentType(0, inputType);
+            if (isOracleDialect()) {
+                return computedSignature.withReturnType(inputType);
+            }
+
+            int resultPrecision = inputType.getPrecision() - inputType.getScale()
+                    + (inputType.getScale() == 0 ? 0 : 1);
+            int maxDisplayLength = resultPrecision + 1;
+            if (maxDisplayLength < MYSQL_SIGNED_BIGINT_MAX_DISPLAY_LENGTH) {
+                return computedSignature.withReturnType(BigIntType.INSTANCE);
+            }
+            return computedSignature.withReturnType(
+                    DecimalV3Type.createDecimalV3Type(resultPrecision, 0));
+        }
+        return ComputePrecisionForRound.super.computePrecision(signature);
+    }
+
+    private boolean isOracleDialect() {
+        return ConnectContext.get() != null
+                && ConnectContext.get().getSessionVariable() != null
+                && ConnectContext.get().getSessionVariable().getSqlParseDialect() == Dialect.ORACLE;
     }
 
     @Override
