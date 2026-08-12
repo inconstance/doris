@@ -121,6 +121,7 @@ import org.apache.doris.persist.ReplacePartitionOperationLog;
 import org.apache.doris.persist.ReplaceTableOperationLog;
 import org.apache.doris.persist.ReplicaPersistInfo;
 import org.apache.doris.persist.RoutineLoadOperation;
+import org.apache.doris.persist.SequencePersistInfo;
 import org.apache.doris.persist.SetPartitionVersionOperationLog;
 import org.apache.doris.persist.SetReplicaStatusOperationLog;
 import org.apache.doris.persist.SetReplicaVersionOperationLog;
@@ -884,6 +885,14 @@ public class JournalEntity implements Writable {
             }
             case OperationType.OP_UPDATE_AUTO_INCREMENT_ID: {
                 data = AutoIncrementIdUpdateLog.read(in);
+                isRead = true;
+                break;
+            }
+            case OperationType.OP_CREATE_SEQUENCE:
+            case OperationType.OP_ALTER_SEQUENCE:
+            case OperationType.OP_DROP_SEQUENCE:
+            case OperationType.OP_UPDATE_SEQUENCE_STATE: {
+                data = SequencePersistInfo.read(in);
                 isRead = true;
                 break;
             }

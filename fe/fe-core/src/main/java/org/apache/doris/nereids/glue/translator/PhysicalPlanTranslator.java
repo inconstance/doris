@@ -172,6 +172,7 @@ import org.apache.doris.nereids.trees.plans.physical.PhysicalRelation;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalRepeat;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalResultSink;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalSchemaScan;
+import org.apache.doris.nereids.trees.plans.physical.PhysicalSequence;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalSetOperation;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalStorageLayerAggregate;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalTVFRelation;
@@ -230,6 +231,7 @@ import org.apache.doris.planner.ResultSink;
 import org.apache.doris.planner.ScanNode;
 import org.apache.doris.planner.SchemaScanNode;
 import org.apache.doris.planner.SelectNode;
+import org.apache.doris.planner.SequenceNode;
 import org.apache.doris.planner.SetOperationNode;
 import org.apache.doris.planner.SortNode;
 import org.apache.doris.planner.TVFTableSink;
@@ -244,6 +246,7 @@ import org.apache.doris.thrift.TPartitionType;
 import org.apache.doris.thrift.TPushAggOp;
 import org.apache.doris.thrift.TResultSinkType;
 import org.apache.doris.thrift.TRuntimeFilterType;
+import org.apache.doris.thrift.TSequenceSpec;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
@@ -1640,6 +1643,37 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
         tableFunctionNode.setNereidsId(generate.getId());
         context.getNereidsIdToPlanNodeIdMap().put(generate.getId(), tableFunctionNode.getId());
         addPlanRoot(currentFragment, tableFunctionNode, generate);
+        return currentFragment;
+    }
+
+    @Override
+    public PlanFragment visitPhysicalSequence(PhysicalSequence<? extends Plan> sequence,
+            PlanTranslatorContext context) {
+        PlanFragment currentFragment = sequence.child().accept(this, context);
+        List<Slot> sequenceSlots = sequence.getSequenceAliases().stream()
+                .map(alias -> alias.toSlot()).collect(Collectors.toList());
+        TupleDescriptor tupleDescriptor = generateTupleDesc(sequenceSlots, null, context);
+        List<TSequenceSpec> specs = Lists.newArrayListWithCapacity(sequence.getSequenceAliases().size());
+        for (int i = 0; i < sequence.getSequenceAliases().size(); i++) {
+            org.apache.doris.nereids.trees.expressions.SequenceValue value
+                    = (org.apache.doris.nereids.trees.expressions.SequenceValue)
+                    sequence.getSequenceAliases().get(i).child(0);
+            TSequenceSpec spec = new TSequenceSpec(value.getDbId(), value.getSequenceId(),
+                    value.getSequenceVersion(), tupleDescriptor.getSlots().get(i).getId().asInt(),
+                    value.isNextVal(), value.getCacheSize());
+            if (!value.isNextVal()) {
+                java.math.BigInteger currval = ConnectContext.get().getSequenceCurrval(value.getSequenceId())
+                        .orElseThrow(() -> new org.apache.doris.nereids.exceptions.AnalysisException(
+                                "CURRVAL is not yet defined in this session for sequence " + value.toSql()));
+                spec.setSessionCurrval(currval.toString());
+            }
+            specs.add(spec);
+        }
+        SequenceNode sequenceNode = new SequenceNode(context.nextPlanNodeId(), currentFragment.getPlanRoot(),
+                tupleDescriptor.getId(), specs);
+        sequenceNode.setNereidsId(sequence.getId());
+        context.getNereidsIdToPlanNodeIdMap().put(sequence.getId(), sequenceNode.getId());
+        addPlanRoot(currentFragment, sequenceNode, sequence);
         return currentFragment;
     }
 

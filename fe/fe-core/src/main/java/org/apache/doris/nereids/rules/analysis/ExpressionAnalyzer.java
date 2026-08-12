@@ -19,8 +19,10 @@ package org.apache.doris.nereids.rules.analysis;
 
 import org.apache.doris.analysis.ArithmeticExpr.Operator;
 import org.apache.doris.analysis.SetType;
+import org.apache.doris.catalog.Database;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.FunctionRegistry;
+import org.apache.doris.catalog.Sequence;
 import org.apache.doris.common.DdlException;
 import org.apache.doris.common.Pair;
 import org.apache.doris.common.util.Util;
@@ -31,6 +33,7 @@ import org.apache.doris.nereids.StatementContext;
 import org.apache.doris.nereids.analyzer.Scope;
 import org.apache.doris.nereids.analyzer.UnboundAlias;
 import org.apache.doris.nereids.analyzer.UnboundFunction;
+import org.apache.doris.nereids.analyzer.UnboundSequenceValue;
 import org.apache.doris.nereids.analyzer.UnboundSlot;
 import org.apache.doris.nereids.analyzer.UnboundStar;
 import org.apache.doris.nereids.analyzer.UnboundVariable;
@@ -64,6 +67,7 @@ import org.apache.doris.nereids.trees.expressions.Match;
 import org.apache.doris.nereids.trees.expressions.Not;
 import org.apache.doris.nereids.trees.expressions.Or;
 import org.apache.doris.nereids.trees.expressions.Placeholder;
+import org.apache.doris.nereids.trees.expressions.SequenceValue;
 import org.apache.doris.nereids.trees.expressions.Slot;
 import org.apache.doris.nereids.trees.expressions.SlotReference;
 import org.apache.doris.nereids.trees.expressions.TimestampArithmetic;
@@ -219,6 +223,31 @@ public class ExpressionAnalyzer extends SubExprAnalyzer<ExpressionRewriteContext
     @Override
     public Expression visitUnboundVariable(UnboundVariable unboundVariable, ExpressionRewriteContext context) {
         return resolveUnboundVariable(unboundVariable);
+    }
+
+    @Override
+    public Expression visitUnboundSequenceValue(UnboundSequenceValue unbound, ExpressionRewriteContext context) {
+        List<String> nameParts = unbound.getNameParts();
+        if (nameParts.isEmpty() || nameParts.size() > 2) {
+            throw new AnalysisException("Sequence pseudocolumn accepts [db.]sequence_name");
+        }
+        ConnectContext connectContext = context == null
+                ? ConnectContext.get() : context.cascadesContext.getConnectContext();
+        String dbName = nameParts.size() == 2 ? nameParts.get(0) : connectContext.getDatabase();
+        String sequenceName = nameParts.get(nameParts.size() - 1);
+        if (dbName == null || dbName.isEmpty()) {
+            throw new AnalysisException("No database selected for sequence " + sequenceName);
+        }
+        Database db = Env.getCurrentInternalCatalog().getDbNullable(dbName);
+        if (db == null) {
+            throw new AnalysisException("Unknown database '" + dbName + "'");
+        }
+        Sequence sequence = db.getSequenceNullable(sequenceName);
+        if (sequence == null) {
+            throw new AnalysisException("Unknown sequence '" + dbName + "." + sequenceName + "'");
+        }
+        return new SequenceValue(db.getId(), sequence.getId(), sequence.getVersion(), sequence.getCacheSize(),
+                dbName + "." + sequence.getName(), unbound.isNextVal());
     }
 
     /** resolveUnboundVariable */

@@ -51,6 +51,7 @@ import org.apache.doris.nereids.trees.plans.logical.LogicalRecursiveUnionProduce
 import org.apache.doris.nereids.trees.plans.logical.LogicalRelation;
 import org.apache.doris.nereids.trees.plans.logical.LogicalRepeat;
 import org.apache.doris.nereids.trees.plans.logical.LogicalSelectHint;
+import org.apache.doris.nereids.trees.plans.logical.LogicalSequence;
 import org.apache.doris.nereids.trees.plans.logical.LogicalSetOperation;
 import org.apache.doris.nereids.trees.plans.logical.LogicalSink;
 import org.apache.doris.nereids.trees.plans.logical.LogicalSort;
@@ -87,6 +88,7 @@ import org.apache.doris.nereids.trees.plans.physical.PhysicalRecursiveUnionAncho
 import org.apache.doris.nereids.trees.plans.physical.PhysicalRecursiveUnionProducer;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalRelation;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalRepeat;
+import org.apache.doris.nereids.trees.plans.physical.PhysicalSequence;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalSetOperation;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalSink;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalSqlCache;
@@ -384,6 +386,14 @@ public abstract class PlanVisitor<R, C> implements CommandVisitor<R, C>, Relatio
 
     public R visitPhysicalRepeat(PhysicalRepeat<? extends Plan> repeat, C context) {
         return visit(repeat, context);
+    }
+
+    public R visitLogicalSequence(LogicalSequence<? extends Plan> sequence, C context) {
+        return visit(sequence, context);
+    }
+
+    public R visitPhysicalSequence(PhysicalSequence<? extends Plan> sequence, C context) {
+        return visit(sequence, context);
     }
 
     public R visitPhysicalSetOperation(PhysicalSetOperation setOperation, C context) {

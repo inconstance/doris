@@ -187,6 +187,9 @@ public class ConnectContext {
     protected volatile SessionVariable sessionVariable;
     // Store user variable in this connection
     private Map<String, LiteralExpr> userVars = new HashMap<>();
+    // Session-local sequence state. It is intentionally keyed by immutable sequence id rather than name,
+    // so dropping and recreating a sequence can never inherit the old object's CURRVAL.
+    private final Map<Long, SequenceCurrval> sequenceCurrvals = new HashMap<>();
     // Connection attributes provided by the MySQL client during handshake.
     private Map<String, String> connectAttributes = new HashMap<>();
     // Scheduler this connection belongs to
@@ -387,6 +390,7 @@ public class ConnectContext {
         }
         resetSessionVariable();
         userVars = new HashMap<>();
+        sequenceCurrvals.clear();
         preparedQuerys.clear();
         preparedStatementContextMap.clear();
         runningQuery = null;
@@ -1155,6 +1159,40 @@ public class ConnectContext {
 
     public StatementContext getStatementContext() {
         return statementContext;
+    }
+
+    /**
+     * Record the last Sequence value actually consumed by a successfully completed statement.
+     * Parallel fragment reports are ordered by the durable FE allocation ticket and then by the
+     * position consumed in that allocation, rather than by report arrival time.
+     */
+    public synchronized void updateSequenceCurrval(long sequenceId, BigInteger value,
+            long sequenceVersion, long allocationTicket, long consumedIndex) {
+        SequenceCurrval previous = sequenceCurrvals.get(sequenceId);
+        if (previous == null || allocationTicket > previous.allocationTicket
+                || (allocationTicket == previous.allocationTicket && consumedIndex > previous.consumedIndex)) {
+            sequenceCurrvals.put(sequenceId,
+                    new SequenceCurrval(value, sequenceVersion, allocationTicket, consumedIndex));
+        }
+    }
+
+    public synchronized Optional<BigInteger> getSequenceCurrval(long sequenceId) {
+        SequenceCurrval currval = sequenceCurrvals.get(sequenceId);
+        return currval == null ? Optional.empty() : Optional.of(currval.value);
+    }
+
+    private static class SequenceCurrval {
+        private final BigInteger value;
+        private final long sequenceVersion;
+        private final long allocationTicket;
+        private final long consumedIndex;
+
+        private SequenceCurrval(BigInteger value, long sequenceVersion, long allocationTicket, long consumedIndex) {
+            this.value = value;
+            this.sequenceVersion = sequenceVersion;
+            this.allocationTicket = allocationTicket;
+            this.consumedIndex = consumedIndex;
+        }
     }
 
     public void setStatementContext(StatementContext statementContext) {

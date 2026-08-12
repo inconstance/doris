@@ -1378,6 +1378,7 @@ public class StmtExecutor {
                     break;
                 }
             }
+            coordBase.commitSequenceCurrvals();
             if (cacheAnalyzer != null && !isDryRun) {
                 if (cacheResult != null && cacheAnalyzer.getHitRange() == Cache.HitRange.Right) {
                     isSendFields =

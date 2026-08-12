@@ -245,6 +245,8 @@ supportedCreateStatement
     | CREATE SQL_BLOCK_RULE (IF NOT EXISTS)?
         name=identifier properties=propertyClause?                        #createSqlBlockRule
     | CREATE ENCRYPTKEY (IF NOT EXISTS)? multipartIdentifier AS STRING_LITERAL  #createEncryptkey
+    | CREATE SEQUENCE (IF NOT EXISTS)? name=multipartIdentifier
+        sequenceOption*                                                         #createSequence
     | CREATE statementScope?
             (TABLES | AGGREGATE)? FUNCTION (IF NOT EXISTS)?
             functionIdentifier LEFT_PAREN functionArguments? RIGHT_PAREN
@@ -290,6 +292,7 @@ dictionaryColumnDef:
 
 supportedAlterStatement
     : ALTER SYSTEM alterSystemClause                                                        #alterSystem
+    | ALTER SEQUENCE name=multipartIdentifier alterSequenceClause+                          #alterSequence
     | ALTER VIEW name=multipartIdentifier
       (MODIFY commentSpec |
       (LEFT_PAREN cols=simpleColumnDefs RIGHT_PAREN)?
@@ -345,6 +348,7 @@ supportedAlterStatement
 
 supportedDropStatement
     : DROP CATALOG RECYCLE BIN WHERE idType=STRING_LITERAL EQ id=INTEGER_VALUE  #dropCatalogRecycleBin
+    | DROP SEQUENCE (IF EXISTS)? name=multipartIdentifier                        #dropSequence
     | DROP ENCRYPTKEY (IF EXISTS)? name=multipartIdentifier                     #dropEncryptkey
     | DROP ROLE (IF EXISTS)? name=identifierOrText                              #dropRole
     | DROP SQL_BLOCK_RULE (IF EXISTS)? identifierSeq                            #dropSqlBlockRule
@@ -377,6 +381,28 @@ supportedDropStatement
     | DROP INVERTED INDEX NORMALIZER (IF EXISTS)? name=identifier               #dropIndexNormalizer
     ;
 
+sequenceOption
+    : START WITH start=sequenceInteger
+    | INCREMENT BY increment=sequenceInteger
+    | MINVALUE min=sequenceInteger
+    | NOMINVALUE
+    | MAXVALUE max=sequenceInteger
+    | NOMAXVALUE
+    | CACHE cache=INTEGER_VALUE
+    | NOCACHE
+    | CYCLE
+    | NOCYCLE
+    ;
+
+sequenceInteger
+    : SUBTRACT? INTEGER_VALUE
+    ;
+
+alterSequenceClause
+    : RESTART (WITH restart=sequenceInteger)?
+    | sequenceOption
+    ;
+
 supportedShowStatement
     : SHOW statementScope? VARIABLES wildWhere?                                     #showVariables
     | SHOW AUTHORS                                                                  #showAuthors
@@ -384,6 +410,7 @@ supportedShowStatement
         ((FROM | IN) database=multipartIdentifier)? wildWhere?
         sortClause? limitClause?                                                    #showAlterTable
     | SHOW CREATE (DATABASE | SCHEMA) name=multipartIdentifier                      #showCreateDatabase
+    | SHOW CREATE SEQUENCE name=multipartIdentifier                                 #showCreateSequence
     | SHOW BACKUP ((FROM | IN) database=identifier)? wildWhere?                     #showBackup
     | SHOW BROKER                                                                   #showBroker
     | SHOW BUILD INDEX ((FROM | IN) database=identifier)?

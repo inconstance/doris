@@ -76,6 +76,7 @@
 #include "exec/operator/result_sink_operator.h"
 #include "exec/operator/schema_scan_operator.h"
 #include "exec/operator/select_operator.h"
+#include "exec/operator/sequence_operator.h"
 #include "exec/operator/set_probe_sink_operator.h"
 #include "exec/operator/set_sink_operator.h"
 #include "exec/operator/set_source_operator.h"
@@ -843,6 +844,7 @@ DECLARE_OPERATOR(PartitionedAggLocalState)
 DECLARE_OPERATOR(TableFunctionLocalState)
 DECLARE_OPERATOR(ExchangeLocalState)
 DECLARE_OPERATOR(RepeatLocalState)
+DECLARE_OPERATOR(SequenceLocalState)
 DECLARE_OPERATOR(NestedLoopJoinProbeLocalState)
 DECLARE_OPERATOR(AssertNumRowsLocalState)
 DECLARE_OPERATOR(EmptySetLocalState)
@@ -867,6 +869,7 @@ DECLARE_OPERATOR(MockScanLocalState)
 #undef DECLARE_OPERATOR
 
 template class StreamingOperatorX<AssertNumRowsLocalState>;
+template class StreamingOperatorX<SequenceLocalState>;
 template class StreamingOperatorX<SelectLocalState>;
 
 template class StatefulOperatorX<HashJoinProbeLocalState>;

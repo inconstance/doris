@@ -1349,6 +1349,22 @@ public class EditLog {
                     env.replayAutoIncrementIdUpdateLog((AutoIncrementIdUpdateLog) journal.getData());
                     break;
                 }
+                case OperationType.OP_CREATE_SEQUENCE: {
+                    env.replayCreateSequence((SequencePersistInfo) journal.getData());
+                    break;
+                }
+                case OperationType.OP_ALTER_SEQUENCE: {
+                    env.replayAlterSequence((SequencePersistInfo) journal.getData());
+                    break;
+                }
+                case OperationType.OP_DROP_SEQUENCE: {
+                    env.replayDropSequence((SequencePersistInfo) journal.getData());
+                    break;
+                }
+                case OperationType.OP_UPDATE_SEQUENCE_STATE: {
+                    env.replayUpdateSequenceState((SequencePersistInfo) journal.getData());
+                    break;
+                }
                 case OperationType.OP_UPDATE_TABLE_STATS: {
                     env.getAnalysisManager().replayUpdateTableStatsStatus((TableStatsMeta) journal.getData());
                     break;
@@ -2469,6 +2485,22 @@ public class EditLog {
 
     public void logUpdateAutoIncrementId(AutoIncrementIdUpdateLog log) {
         logEdit(OperationType.OP_UPDATE_AUTO_INCREMENT_ID, log);
+    }
+
+    public void logCreateSequence(SequencePersistInfo info) {
+        logEdit(OperationType.OP_CREATE_SEQUENCE, info);
+    }
+
+    public void logAlterSequence(SequencePersistInfo info) {
+        logEdit(OperationType.OP_ALTER_SEQUENCE, info);
+    }
+
+    public void logDropSequence(SequencePersistInfo info) {
+        logEdit(OperationType.OP_DROP_SEQUENCE, info);
+    }
+
+    public long logUpdateSequenceState(SequencePersistInfo info) {
+        return logEdit(OperationType.OP_UPDATE_SEQUENCE_STATE, info);
     }
 
     public void logCreateTableStats(TableStatsMeta tableStats) {

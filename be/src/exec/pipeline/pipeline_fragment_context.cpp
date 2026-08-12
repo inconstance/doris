@@ -101,6 +101,7 @@
 #include "exec/operator/result_sink_operator.h"
 #include "exec/operator/schema_scan_operator.h"
 #include "exec/operator/select_operator.h"
+#include "exec/operator/sequence_operator.h"
 #include "exec/operator/set_probe_sink_operator.h"
 #include "exec/operator/set_sink_operator.h"
 #include "exec/operator/set_source_operator.h"
@@ -1697,6 +1698,11 @@ Status PipelineFragmentContext::_create_operator(ObjectPool* pool, const TPlanNo
         RETURN_IF_ERROR(cur_pipe->add_operator(op, _parallel_instances));
         break;
     }
+    case TPlanNodeType::SEQUENCE_NODE: {
+        op = std::make_shared<SequenceOperatorX>(pool, tnode, next_operator_id(), descs);
+        RETURN_IF_ERROR(cur_pipe->add_operator(op, _parallel_instances));
+        break;
+    }
     case TPlanNodeType::EMPTY_SET_NODE: {
         op = std::make_shared<EmptySetSourceOperatorX>(pool, tnode, next_operator_id(), descs);
         RETURN_IF_ERROR(cur_pipe->add_operator(op, _parallel_instances));
@@ -2030,6 +2036,20 @@ void PipelineFragmentContext::_coordinator_callback(const ReportStatusRequest& r
     params.__isset.profile = false;
 
     DCHECK(req.runtime_state != nullptr);
+
+    if (auto usages = req.runtime_state->sequence_usages(); !usages.empty()) {
+        params.__set_sequence_usages(usages);
+    }
+    for (auto* rs : req.runtime_states) {
+        if (rs == req.runtime_state) {
+            continue;
+        }
+        if (auto usages = rs->sequence_usages(); !usages.empty()) {
+            params.__isset.sequence_usages = true;
+            params.sequence_usages.insert(params.sequence_usages.end(), usages.begin(),
+                                          usages.end());
+        }
+    }
 
     if (req.runtime_state->query_type() == TQueryType::LOAD) {
         params.__set_loaded_rows(req.runtime_state->num_rows_load_total());

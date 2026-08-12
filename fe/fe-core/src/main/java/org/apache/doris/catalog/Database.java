@@ -55,11 +55,13 @@ import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Objects;
@@ -106,6 +108,11 @@ public class Database extends MetaObject implements Writable, DatabaseIf<Table>,
     // user define encryptKey for current db
     @SerializedName(value = "dbEncryptKey")
     private DatabaseEncryptKey dbEncryptKey;
+
+    // Database-level sequences. The ID index is rebuilt from this persisted name index.
+    @SerializedName(value = "nameToSequence")
+    private ConcurrentMap<String, Sequence> nameToSequence = Maps.newConcurrentMap();
+    private transient ConcurrentMap<Long, Sequence> idToSequence = Maps.newConcurrentMap();
 
     @SerializedName(value = "dataQuotaBytes")
     private volatile long dataQuotaBytes;
@@ -162,6 +169,8 @@ public class Database extends MetaObject implements Writable, DatabaseIf<Table>,
         this.dbState = DbState.NORMAL;
         this.attachDbName = "";
         this.dbEncryptKey = new DatabaseEncryptKey();
+        this.nameToSequence = Maps.newConcurrentMap();
+        this.idToSequence = Maps.newConcurrentMap();
     }
 
     // DO NOT use it except for replaying OP_CREATE_DB
@@ -175,6 +184,62 @@ public class Database extends MetaObject implements Writable, DatabaseIf<Table>,
 
     public void unmarkDropped() {
         isDropped = false;
+    }
+
+    private static String normalizeSequenceName(String sequenceName) {
+        return sequenceName.toLowerCase(Locale.ROOT);
+    }
+
+    public Sequence getSequenceNullable(String sequenceName) {
+        return nameToSequence.get(normalizeSequenceName(sequenceName));
+    }
+
+    public Sequence getSequenceNullable(long sequenceId) {
+        return idToSequence.get(sequenceId);
+    }
+
+    public Map<String, Sequence> getSequences() {
+        return Collections.unmodifiableMap(nameToSequence);
+    }
+
+    /** Caller must hold the database write lock. */
+    public boolean registerSequence(Sequence sequence) {
+        Preconditions.checkState(isWriteLockHeldByCurrentThread());
+        String normalizedName = normalizeSequenceName(sequence.getName());
+        if (nameToSequence.putIfAbsent(normalizedName, sequence) != null) {
+            return false;
+        }
+        Sequence old = idToSequence.putIfAbsent(sequence.getId(), sequence);
+        if (old != null) {
+            nameToSequence.remove(normalizedName, sequence);
+            return false;
+        }
+        return true;
+    }
+
+    /** Caller must hold the database write lock. */
+    public Sequence unregisterSequence(String sequenceName) {
+        Preconditions.checkState(isWriteLockHeldByCurrentThread());
+        Sequence removed = nameToSequence.remove(normalizeSequenceName(sequenceName));
+        if (removed != null) {
+            idToSequence.remove(removed.getId(), removed);
+        }
+        return removed;
+    }
+
+    /** Caller must hold the database write lock. */
+    public boolean replaceSequence(Sequence expected, Sequence replacement) {
+        Preconditions.checkState(isWriteLockHeldByCurrentThread());
+        Preconditions.checkArgument(expected.getId() == replacement.getId());
+        String normalizedName = normalizeSequenceName(expected.getName());
+        if (!nameToSequence.replace(normalizedName, expected, replacement)) {
+            return false;
+        }
+        if (!idToSequence.replace(expected.getId(), expected, replacement)) {
+            nameToSequence.replace(normalizedName, replacement, expected);
+            return false;
+        }
+        return true;
     }
 
     public void readLock() {
@@ -711,6 +776,17 @@ public class Database extends MetaObject implements Writable, DatabaseIf<Table>,
         nameToTable.forEach((tn, tb) -> {
             registerTable(tb);
         });
+
+        if (nameToSequence == null) {
+            nameToSequence = Maps.newConcurrentMap();
+        }
+        idToSequence = Maps.newConcurrentMap();
+        for (Sequence sequence : nameToSequence.values()) {
+            Sequence previous = idToSequence.put(sequence.getId(), sequence);
+            if (previous != null) {
+                throw new IOException("Duplicate sequence id " + sequence.getId() + " in database " + id);
+            }
+        }
 
         String txnQuotaStr = dbProperties.getOrDefault(TRANSACTION_QUOTA_SIZE,
                 String.valueOf(Config.max_running_txn_num_per_db));
