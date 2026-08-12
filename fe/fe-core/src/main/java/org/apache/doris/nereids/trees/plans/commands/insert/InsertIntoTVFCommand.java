@@ -139,6 +139,7 @@ public class InsertIntoTVFCommand extends Command implements ForwardWithSync, Ex
             }
 
             if (coordinator.getExecStatus().ok()) {
+                coordinator.commitSequenceCurrvals();
                 String label = labelName.orElse(
                         String.format("tvf_insert_%x_%x", ctx.queryId().hi, ctx.queryId().lo));
                 long loadedRows = 0;

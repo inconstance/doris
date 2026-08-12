@@ -51,6 +51,7 @@ import org.junit.Test;
 import org.mockito.MockedStatic;
 import org.mockito.Mockito;
 
+import java.math.BigInteger;
 import java.nio.channels.SocketChannel;
 import java.util.HashMap;
 import java.util.List;
@@ -81,6 +82,21 @@ public class ConnectContextTest {
 
     @Before
     public void setUp() throws Exception {
+    }
+
+    @Test
+    public void testSequenceCurrvalUsesAllocationOrder() {
+        ConnectContext ctx = new ConnectContext();
+        Assert.assertFalse(ctx.getSequenceCurrval(10).isPresent());
+
+        ctx.updateSequenceCurrval(10, BigInteger.valueOf(101), 1, 7, 1);
+        ctx.updateSequenceCurrval(10, BigInteger.valueOf(99), 1, 6, 100);
+        ctx.updateSequenceCurrval(10, BigInteger.valueOf(100), 1, 7, 0);
+        Assert.assertEquals(BigInteger.valueOf(101), ctx.getSequenceCurrval(10).get());
+
+        ctx.updateSequenceCurrval(10, BigInteger.valueOf(102), 1, 7, 2);
+        Assert.assertEquals(BigInteger.valueOf(102), ctx.getSequenceCurrval(10).get());
+        Assert.assertFalse(ctx.getSequenceCurrval(11).isPresent());
     }
 
     @Test

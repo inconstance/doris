@@ -37,4 +37,7 @@ public interface CoordInterface {
     List<TNetworkAddress> getInvolvedBackends();
 
     void setIsProfileSafeStmt(boolean isSafe);
+
+    /** Publish statement-scoped Sequence usage after the whole statement succeeds. */
+    default void commitSequenceCurrvals() {}
 }

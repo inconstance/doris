@@ -40,6 +40,7 @@ import org.apache.doris.catalog.Partition;
 import org.apache.doris.catalog.PartitionInfo;
 import org.apache.doris.catalog.PartitionType;
 import org.apache.doris.catalog.Replica;
+import org.apache.doris.catalog.Sequence;
 import org.apache.doris.catalog.Table;
 import org.apache.doris.catalog.TableIf;
 import org.apache.doris.catalog.TableIf.TableType;
@@ -265,6 +266,9 @@ import org.apache.doris.thrift.TRollbackTxnResult;
 import org.apache.doris.thrift.TRoutineLoadJob;
 import org.apache.doris.thrift.TScanRangeLocations;
 import org.apache.doris.thrift.TSchemaTableName;
+import org.apache.doris.thrift.TSequenceRangeRequest;
+import org.apache.doris.thrift.TSequenceRangeResult;
+import org.apache.doris.thrift.TSequenceRangeSegment;
 import org.apache.doris.thrift.TShowProcessListRequest;
 import org.apache.doris.thrift.TShowProcessListResult;
 import org.apache.doris.thrift.TShowUserRequest;
@@ -2930,6 +2934,41 @@ public class FrontendServiceImpl implements FrontendService.Iface {
             status.addToErrorMsgs(e.getMessage());
         } catch (Throwable e) {
             LOG.warn("[auto-inc] catch unknown result.", e);
+            status.setStatusCode(TStatusCode.INTERNAL_ERROR);
+            status.addToErrorMsgs(e.getClass().getSimpleName() + ": " + Strings.nullToEmpty(e.getMessage()));
+        }
+        return result;
+    }
+
+    @Override
+    public TSequenceRangeResult getSequenceRange(TSequenceRangeRequest request) {
+        TSequenceRangeResult result = new TSequenceRangeResult();
+        TStatus status = checkMaster();
+        result.setStatus(status);
+        if (status.getStatusCode() != TStatusCode.OK) {
+            result.setMasterAddress(getMasterAddress());
+            return result;
+        }
+
+        try {
+            Sequence.AllocationResult allocation = Env.getCurrentInternalCatalog().allocateSequenceRange(
+                    request.getDbId(), request.getSequenceId(), request.getCount(), request.getSequenceVersion());
+            for (Sequence.RangeSegment segment : allocation.getSegments()) {
+                result.addToSegments(new TSequenceRangeSegment()
+                        .setStartValue(segment.getStartValue().toString())
+                        .setIncrement(segment.getIncrement().toString())
+                        .setCount(segment.getCount())
+                        .setCycleEpoch(segment.getCycleEpoch()));
+            }
+            result.setSequenceVersion(allocation.getSequenceVersion());
+            result.setAllocationTicket(allocation.getAllocationTicket());
+        } catch (UserException e) {
+            LOG.warn("Failed to allocate sequence range: sequence_id={}, count={}, message={}",
+                    request.getSequenceId(), request.getCount(), e.getMessage());
+            status.setStatusCode(TStatusCode.ANALYSIS_ERROR);
+            status.addToErrorMsgs(e.getMessage());
+        } catch (Throwable e) {
+            LOG.warn("Unexpected failure while allocating sequence range", e);
             status.setStatusCode(TStatusCode.INTERNAL_ERROR);
             status.addToErrorMsgs(e.getClass().getSimpleName() + ": " + Strings.nullToEmpty(e.getMessage()));
         }

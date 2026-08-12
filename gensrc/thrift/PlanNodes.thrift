@@ -62,7 +62,8 @@ enum TPlanNodeType {
   GROUP_COMMIT_SCAN_NODE = 33,
   MATERIALIZATION_NODE = 34,
   REC_CTE_NODE = 35,
-  REC_CTE_SCAN_NODE = 36
+  REC_CTE_SCAN_NODE = 36,
+  SEQUENCE_NODE = 37
 }
 
 struct TKeyRange {
@@ -1370,6 +1371,20 @@ struct TAssertNumRowsNode {
     4: optional bool should_convert_output_to_nullable;
 }
 
+struct TSequenceSpec {
+    1: required i64 db_id;
+    2: required i64 sequence_id;
+    3: required i64 sequence_version;
+    4: required Types.TSlotId output_slot_id;
+    5: required bool next_val;
+    6: optional string session_currval;
+    7: required i64 cache_size;
+}
+
+struct TSequenceNode {
+    1: required list<TSequenceSpec> sequences;
+}
+
 enum TRuntimeFilterType {
   IN = 1,
   BLOOM = 2,
@@ -1539,6 +1554,7 @@ struct TPlanNode {
   50: optional list<list<Exprs.TExpr>> distribute_expr_lists
   51: optional bool is_serial_operator
   52: optional TRecCTEScanNode rec_cte_scan_node
+  53: optional TSequenceNode sequence_node
 
   // projections is final projections, which means projecting into results and materializing them into the output block.
   101: optional list<Exprs.TExpr> projections

@@ -259,6 +259,7 @@ public abstract class AbstractInsertExecutor {
             for (InsertExecutorListener listener : listeners) {
                 listener.afterComplete(this, executor, jobId);
             }
+            coordinator.commitSequenceCurrvals();
         } catch (Throwable t) {
             onFail(t);
             // retry insert into from select when meet "need re-plan error" or no scan node in cloud

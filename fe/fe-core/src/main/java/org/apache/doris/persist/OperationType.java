@@ -422,6 +422,11 @@ public class OperationType {
     public static final short OP_CREATE_ROLE_MAPPING = 496;
     public static final short OP_DROP_ROLE_MAPPING = 497;
 
+    public static final short OP_CREATE_SEQUENCE = 498;
+    public static final short OP_DROP_SEQUENCE = 499;
+    public static final short OP_UPDATE_SEQUENCE_STATE = 500;
+    public static final short OP_ALTER_SEQUENCE = 501;
+
     // For cloud.
     public static final short OP_UPDATE_CLOUD_REPLICA = 1000;
     @Deprecated

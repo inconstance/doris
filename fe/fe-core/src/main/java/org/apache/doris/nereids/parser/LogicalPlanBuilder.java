@@ -506,6 +506,7 @@ import org.apache.doris.nereids.analyzer.UnboundInlineTable;
 import org.apache.doris.nereids.analyzer.UnboundOneRowRelation;
 import org.apache.doris.nereids.analyzer.UnboundRelation;
 import org.apache.doris.nereids.analyzer.UnboundResultSink;
+import org.apache.doris.nereids.analyzer.UnboundSequenceValue;
 import org.apache.doris.nereids.analyzer.UnboundSlot;
 import org.apache.doris.nereids.analyzer.UnboundStar;
 import org.apache.doris.nereids.analyzer.UnboundTVFRelation;
@@ -662,6 +663,7 @@ import org.apache.doris.nereids.trees.plans.commands.AlterMTMVCommand;
 import org.apache.doris.nereids.trees.plans.commands.AlterResourceCommand;
 import org.apache.doris.nereids.trees.plans.commands.AlterRoleCommand;
 import org.apache.doris.nereids.trees.plans.commands.AlterRoutineLoadCommand;
+import org.apache.doris.nereids.trees.plans.commands.AlterSequenceCommand;
 import org.apache.doris.nereids.trees.plans.commands.AlterSqlBlockRuleCommand;
 import org.apache.doris.nereids.trees.plans.commands.AlterStoragePolicyCommand;
 import org.apache.doris.nereids.trees.plans.commands.AlterStorageVaultCommand;
@@ -712,6 +714,7 @@ import org.apache.doris.nereids.trees.plans.commands.CreateRepositoryCommand;
 import org.apache.doris.nereids.trees.plans.commands.CreateResourceCommand;
 import org.apache.doris.nereids.trees.plans.commands.CreateRoleCommand;
 import org.apache.doris.nereids.trees.plans.commands.CreateRoleMappingCommand;
+import org.apache.doris.nereids.trees.plans.commands.CreateSequenceCommand;
 import org.apache.doris.nereids.trees.plans.commands.CreateSqlBlockRuleCommand;
 import org.apache.doris.nereids.trees.plans.commands.CreateStageCommand;
 import org.apache.doris.nereids.trees.plans.commands.CreateStorageVaultCommand;
@@ -751,6 +754,7 @@ import org.apache.doris.nereids.trees.plans.commands.DropResourceCommand;
 import org.apache.doris.nereids.trees.plans.commands.DropRoleCommand;
 import org.apache.doris.nereids.trees.plans.commands.DropRoleMappingCommand;
 import org.apache.doris.nereids.trees.plans.commands.DropRowPolicyCommand;
+import org.apache.doris.nereids.trees.plans.commands.DropSequenceCommand;
 import org.apache.doris.nereids.trees.plans.commands.DropSqlBlockRuleCommand;
 import org.apache.doris.nereids.trees.plans.commands.DropStageCommand;
 import org.apache.doris.nereids.trees.plans.commands.DropStatsCommand;
@@ -821,6 +825,7 @@ import org.apache.doris.nereids.trees.plans.commands.ShowCreateMTMVCommand;
 import org.apache.doris.nereids.trees.plans.commands.ShowCreateMaterializedViewCommand;
 import org.apache.doris.nereids.trees.plans.commands.ShowCreateProcedureCommand;
 import org.apache.doris.nereids.trees.plans.commands.ShowCreateRepositoryCommand;
+import org.apache.doris.nereids.trees.plans.commands.ShowCreateSequenceCommand;
 import org.apache.doris.nereids.trees.plans.commands.ShowCreateStorageVaultCommand;
 import org.apache.doris.nereids.trees.plans.commands.ShowCreateTableCommand;
 import org.apache.doris.nereids.trees.plans.commands.ShowCreateUserCommand;
@@ -1132,6 +1137,7 @@ import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -3662,7 +3668,14 @@ public class LogicalPlanBuilder extends DorisParserBaseVisitor<Object> {
             if (e instanceof UnboundSlot) {
                 UnboundSlot unboundAttribute = (UnboundSlot) e;
                 List<String> nameParts = Lists.newArrayList(unboundAttribute.getNameParts());
-                nameParts.add(ctx.fieldName.getText());
+                String fieldName = ctx.fieldName.getText();
+                if (fieldName.equalsIgnoreCase("NEXTVAL") || fieldName.equalsIgnoreCase("CURRVAL")) {
+                    if (nameParts.size() > 2) {
+                        throw new ParseException("Sequence pseudocolumn accepts [db.]sequence_name", ctx);
+                    }
+                    return new UnboundSequenceValue(nameParts, fieldName.equalsIgnoreCase("NEXTVAL"));
+                }
+                nameParts.add(fieldName);
                 UnboundSlot slot = new UnboundSlot(nameParts, Optional.empty());
                 return slot;
             } else {
@@ -7132,6 +7145,11 @@ public class LogicalPlanBuilder extends DorisParserBaseVisitor<Object> {
     }
 
     @Override
+    public LogicalPlan visitShowCreateSequence(DorisParser.ShowCreateSequenceContext ctx) {
+        return new ShowCreateSequenceCommand(visitMultipartIdentifier(ctx.name));
+    }
+
+    @Override
     public LogicalPlan visitShowCreateFunction(ShowCreateFunctionContext ctx) {
         SetType statementScope = visitStatementScope(ctx.statementScope());
         FunctionName function = visitFunctionIdentifier(ctx.functionIdentifier());
@@ -7479,6 +7497,88 @@ public class LogicalPlanBuilder extends DorisParserBaseVisitor<Object> {
     }
 
     @Override
+    public LogicalPlan visitCreateSequence(DorisParser.CreateSequenceContext ctx) {
+        EnumMap<CreateSequenceCommand.Option, String> options =
+                new EnumMap<>(CreateSequenceCommand.Option.class);
+        for (DorisParser.SequenceOptionContext option : ctx.sequenceOption()) {
+            applySequenceOption(options, option, true);
+        }
+        return new CreateSequenceCommand(visitMultipartIdentifier(ctx.name), ctx.EXISTS() != null, options);
+    }
+
+    @Override
+    public LogicalPlan visitAlterSequence(DorisParser.AlterSequenceContext ctx) {
+        EnumMap<CreateSequenceCommand.Option, String> options =
+                new EnumMap<>(CreateSequenceCommand.Option.class);
+        boolean restart = false;
+        BigInteger restartValue = null;
+        for (DorisParser.AlterSequenceClauseContext clause : ctx.alterSequenceClause()) {
+            if (clause.RESTART() != null) {
+                if (restart) {
+                    throw new ParseException("Duplicate sequence option RESTART", clause);
+                }
+                restart = true;
+                restartValue = clause.restart == null ? null : new BigInteger(clause.restart.getText());
+            } else {
+                applySequenceOption(options, clause.sequenceOption(), false);
+            }
+        }
+        return new AlterSequenceCommand(visitMultipartIdentifier(ctx.name), options, restart, restartValue);
+    }
+
+    private void applySequenceOption(Map<CreateSequenceCommand.Option, String> options,
+            DorisParser.SequenceOptionContext option, boolean allowStart) {
+        if (option.start != null) {
+            if (!allowStart) {
+                throw new ParseException("ALTER SEQUENCE uses RESTART WITH instead of START WITH", option);
+            }
+            putSequenceOption(options, CreateSequenceCommand.Option.START, option.start.getText(), option);
+        } else if (option.increment != null) {
+            putSequenceOption(options, CreateSequenceCommand.Option.INCREMENT, option.increment.getText(), option);
+        } else if (option.MINVALUE() != null) {
+            putExclusiveSequenceOption(options, CreateSequenceCommand.Option.MINVALUE,
+                    CreateSequenceCommand.Option.NOMINVALUE, option.min.getText(), option);
+        } else if (option.NOMINVALUE() != null) {
+            putExclusiveSequenceOption(options, CreateSequenceCommand.Option.NOMINVALUE,
+                    CreateSequenceCommand.Option.MINVALUE, "", option);
+        } else if (option.MAXVALUE() != null) {
+            putExclusiveSequenceOption(options, CreateSequenceCommand.Option.MAXVALUE,
+                    CreateSequenceCommand.Option.NOMAXVALUE, option.max.getText(), option);
+        } else if (option.NOMAXVALUE() != null) {
+            putExclusiveSequenceOption(options, CreateSequenceCommand.Option.NOMAXVALUE,
+                    CreateSequenceCommand.Option.MAXVALUE, "", option);
+        } else if (option.CACHE() != null) {
+            putExclusiveSequenceOption(options, CreateSequenceCommand.Option.CACHE,
+                    CreateSequenceCommand.Option.NOCACHE, option.cache.getText(), option);
+        } else if (option.NOCACHE() != null) {
+            putExclusiveSequenceOption(options, CreateSequenceCommand.Option.NOCACHE,
+                    CreateSequenceCommand.Option.CACHE, "", option);
+        } else if (option.CYCLE() != null) {
+            putExclusiveSequenceOption(options, CreateSequenceCommand.Option.CYCLE,
+                    CreateSequenceCommand.Option.NOCYCLE, "", option);
+        } else {
+            putExclusiveSequenceOption(options, CreateSequenceCommand.Option.NOCYCLE,
+                    CreateSequenceCommand.Option.CYCLE, "", option);
+        }
+    }
+
+    private void putSequenceOption(Map<CreateSequenceCommand.Option, String> options,
+            CreateSequenceCommand.Option key, String value, ParserRuleContext ctx) {
+        if (options.putIfAbsent(key, value) != null) {
+            throw new ParseException("Duplicate sequence option " + key, ctx);
+        }
+    }
+
+    private void putExclusiveSequenceOption(Map<CreateSequenceCommand.Option, String> options,
+            CreateSequenceCommand.Option key, CreateSequenceCommand.Option opposite,
+            String value, ParserRuleContext ctx) {
+        if (options.containsKey(opposite)) {
+            throw new ParseException("Conflicting sequence options " + key + " and " + opposite, ctx);
+        }
+        putSequenceOption(options, key, value, ctx);
+    }
+
+    @Override
     public LogicalPlan visitAlterCatalogRename(AlterCatalogRenameContext ctx) {
         String catalogName = stripQuotes(ctx.name.getText());
         String newName = stripQuotes(ctx.newName.getText());
@@ -7496,6 +7596,11 @@ public class LogicalPlanBuilder extends DorisParserBaseVisitor<Object> {
     public LogicalPlan visitDropEncryptkey(DropEncryptkeyContext ctx) {
         List<String> nameParts = visitMultipartIdentifier(ctx.name);
         return new DropEncryptkeyCommand(new EncryptKeyName(nameParts), ctx.EXISTS() != null);
+    }
+
+    @Override
+    public LogicalPlan visitDropSequence(DorisParser.DropSequenceContext ctx) {
+        return new DropSequenceCommand(visitMultipartIdentifier(ctx.name), ctx.EXISTS() != null);
     }
 
     @Override

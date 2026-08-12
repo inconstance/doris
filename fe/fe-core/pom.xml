@@ -1064,6 +1064,7 @@ under the License.
                                 <!-- add arbitrary num of src dirs here -->
                                 <source>${basedir}/target/generated-sources/build/</source>
                                 <source>${basedir}/target/generated-sources/</source>
+                                <source>${basedir}/../../gensrc/build/gen_java/</source>
                             </sources>
                         </configuration>
                     </execution>

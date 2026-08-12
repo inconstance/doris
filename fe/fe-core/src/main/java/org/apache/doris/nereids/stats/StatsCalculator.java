@@ -96,6 +96,7 @@ import org.apache.doris.nereids.trees.plans.logical.LogicalRecursiveUnionAnchor;
 import org.apache.doris.nereids.trees.plans.logical.LogicalRecursiveUnionProducer;
 import org.apache.doris.nereids.trees.plans.logical.LogicalRepeat;
 import org.apache.doris.nereids.trees.plans.logical.LogicalSchemaScan;
+import org.apache.doris.nereids.trees.plans.logical.LogicalSequence;
 import org.apache.doris.nereids.trees.plans.logical.LogicalSink;
 import org.apache.doris.nereids.trees.plans.logical.LogicalSort;
 import org.apache.doris.nereids.trees.plans.logical.LogicalTVFRelation;
@@ -134,6 +135,7 @@ import org.apache.doris.nereids.trees.plans.physical.PhysicalRecursiveUnionProdu
 import org.apache.doris.nereids.trees.plans.physical.PhysicalRelation;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalRepeat;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalSchemaScan;
+import org.apache.doris.nereids.trees.plans.physical.PhysicalSequence;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalSink;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalStorageLayerAggregate;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalTVFRelation;
@@ -910,6 +912,11 @@ public class StatsCalculator extends DefaultPlanVisitor<Statistics, Void> {
     }
 
     @Override
+    public Statistics visitLogicalSequence(LogicalSequence<? extends Plan> sequence, Void context) {
+        return computeSequence(sequence.getSequenceAliases(), groupExpression.childStatistics(0));
+    }
+
+    @Override
     public Statistics visitLogicalSort(LogicalSort<? extends Plan> sort, Void context) {
         return groupExpression.childStatistics(0);
     }
@@ -1146,6 +1153,11 @@ public class StatsCalculator extends DefaultPlanVisitor<Statistics, Void> {
     @Override
     public Statistics visitPhysicalProject(PhysicalProject<? extends Plan> project, Void context) {
         return computeProject(project, groupExpression.childStatistics(0));
+    }
+
+    @Override
+    public Statistics visitPhysicalSequence(PhysicalSequence<? extends Plan> sequence, Void context) {
+        return computeSequence(sequence.getSequenceAliases(), groupExpression.childStatistics(0));
     }
 
     @Override
@@ -1539,6 +1551,15 @@ public class StatsCalculator extends DefaultPlanVisitor<Statistics, Void> {
             projectionStats.putIfAbsent(projection.toSlot(), columnStatistic);
         }
         return new Statistics(childStats.getRowCount(), childStats.getWidthInJoinCluster(), projectionStats);
+    }
+
+    private Statistics computeSequence(List<Alias> sequenceAliases, Statistics childStats) {
+        StatisticsBuilder builder = new StatisticsBuilder(childStats);
+        for (Alias alias : sequenceAliases) {
+            Slot slot = alias.toSlot();
+            builder.putColumnStatistics(slot, ColumnStatistic.createUnknownByDataType(slot.getDataType()));
+        }
+        return builder.build();
     }
 
     /**

@@ -27,10 +27,12 @@ import org.apache.doris.nereids.memo.GroupExpression;
 import org.apache.doris.nereids.properties.DataTrait;
 import org.apache.doris.nereids.properties.LogicalProperties;
 import org.apache.doris.nereids.rules.exploration.join.JoinReorderContext;
+import org.apache.doris.nereids.trees.expressions.Alias;
 import org.apache.doris.nereids.trees.expressions.EqualTo;
 import org.apache.doris.nereids.trees.expressions.ExprId;
 import org.apache.doris.nereids.trees.expressions.Expression;
 import org.apache.doris.nereids.trees.expressions.Or;
+import org.apache.doris.nereids.trees.expressions.SequenceValue;
 import org.apache.doris.nereids.trees.expressions.SlotReference;
 import org.apache.doris.nereids.trees.expressions.StatementScopeIdGenerator;
 import org.apache.doris.nereids.trees.expressions.literal.IntegerLiteral;
@@ -45,6 +47,7 @@ import org.apache.doris.nereids.trees.plans.logical.LogicalFilter;
 import org.apache.doris.nereids.trees.plans.logical.LogicalJoin;
 import org.apache.doris.nereids.trees.plans.logical.LogicalLimit;
 import org.apache.doris.nereids.trees.plans.logical.LogicalOlapScan;
+import org.apache.doris.nereids.trees.plans.logical.LogicalSequence;
 import org.apache.doris.nereids.trees.plans.logical.LogicalTopN;
 import org.apache.doris.nereids.trees.plans.logical.LogicalUnion;
 import org.apache.doris.nereids.types.IntegerType;
@@ -86,6 +89,28 @@ public class StatsCalculatorTest {
                 new LogicalProperties(Collections::emptyList, () -> DataTrait.EMPTY_TRAIT));
         group.getLogicalExpressions().remove(0);
         return group;
+    }
+
+    @Test
+    public void testSequenceStats() {
+        SlotReference childSlot = new SlotReference("id", IntegerType.INSTANCE, false);
+        ColumnStatistic childColumnStats = new ColumnStatisticBuilder().setNdv(3).build();
+        Statistics childStats = new Statistics(3, ImmutableMap.of(childSlot, childColumnStats));
+        Group childGroup = newFakeGroup();
+        childGroup.setStatistics(childStats);
+
+        Alias sequenceAlias = new Alias(new SequenceValue(1, 2, 1, 20, "db.seq", true), "sequence_value");
+        LogicalSequence<GroupPlan> sequence = new LogicalSequence<>(
+                ImmutableList.of(sequenceAlias), new GroupPlan(childGroup));
+        GroupExpression groupExpression = new GroupExpression(sequence, ImmutableList.of(childGroup));
+        Group ownerGroup = new Group(null, groupExpression, null);
+
+        StatsCalculator.estimate(groupExpression, null);
+
+        Statistics sequenceStats = ownerGroup.getStatistics();
+        Assertions.assertEquals(3, sequenceStats.getRowCount());
+        Assertions.assertSame(childColumnStats, sequenceStats.findColumnStatistics(childSlot));
+        Assertions.assertNotNull(sequenceStats.findColumnStatistics(sequenceAlias.toSlot()));
     }
 
     @Test

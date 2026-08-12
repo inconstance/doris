@@ -27,6 +27,7 @@ import org.apache.doris.nereids.trees.expressions.Alias;
 import org.apache.doris.nereids.trees.expressions.EqualTo;
 import org.apache.doris.nereids.trees.expressions.Expression;
 import org.apache.doris.nereids.trees.expressions.NamedExpression;
+import org.apache.doris.nereids.trees.expressions.SequenceValue;
 import org.apache.doris.nereids.trees.expressions.SlotReference;
 import org.apache.doris.nereids.trees.expressions.StatementScopeIdGenerator;
 import org.apache.doris.nereids.trees.expressions.VolatileIdentity;
@@ -39,7 +40,9 @@ import org.apache.doris.nereids.trees.plans.JoinType;
 import org.apache.doris.nereids.trees.plans.Plan;
 import org.apache.doris.nereids.trees.plans.logical.LogicalJoin;
 import org.apache.doris.nereids.trees.plans.logical.LogicalOlapScan;
+import org.apache.doris.nereids.trees.plans.logical.LogicalOneRowRelation;
 import org.apache.doris.nereids.trees.plans.logical.LogicalProject;
+import org.apache.doris.nereids.trees.plans.logical.LogicalSequence;
 import org.apache.doris.nereids.types.IntegerType;
 import org.apache.doris.nereids.util.MemoPatternMatchSupported;
 import org.apache.doris.nereids.util.MemoTestUtils;
@@ -102,7 +105,7 @@ public class AddProjectForVolatileExpressionTest implements MemoPatternMatchSupp
                 new Alias(new Add(random2, new DoubleLiteral(1.0))),
                 new Alias(random3));
         LogicalProject<?> project = new LogicalProject<Plan>(projections, studentOlapScan);
-        Optional<Pair<List<NamedExpression>, LogicalProject<Plan>>> result = new AddProjectForVolatileExpression()
+        Optional<Pair<List<NamedExpression>, Plan>> result = new AddProjectForVolatileExpression()
                 .rewriteExpressions(project, project.getProjects());
         Assertions.assertEquals(Optional.empty(), result);
     }
@@ -116,7 +119,7 @@ public class AddProjectForVolatileExpressionTest implements MemoPatternMatchSupp
                 new Alias(new Add(random2, new DoubleLiteral(1.0))),
                 new Alias(random2));
         LogicalProject<?> project = new LogicalProject<Plan>(projections, studentOlapScan);
-        Optional<Pair<List<NamedExpression>, LogicalProject<Plan>>> result = new AddProjectForVolatileExpression()
+        Optional<Pair<List<NamedExpression>, Plan>> result = new AddProjectForVolatileExpression()
                 .rewriteExpressions(project, project.getProjects());
         Assertions.assertTrue(result.isPresent());
         Assertions.assertInstanceOf(LogicalProject.class, result.get().second);
@@ -132,6 +135,45 @@ public class AddProjectForVolatileExpressionTest implements MemoPatternMatchSupp
                 new Alias(projections.get(2).getExprId(), alis.toSlot())
         );
         Assertions.assertEquals(expectedTopProjections, result.get().first);
+    }
+
+    @Test
+    void testSequenceValuesShareOneHiddenSlotPerRow() {
+        SequenceValue currVal = new SequenceValue(1, 10, 3, 20, "db.seq", false);
+        SequenceValue nextVal = new SequenceValue(1, 10, 3, 20, "db.seq", true);
+        List<NamedExpression> projections = ImmutableList.of(
+                new Alias(currVal), new Alias(nextVal), new Alias(nextVal));
+        LogicalProject<?> project = new LogicalProject<Plan>(projections, studentOlapScan);
+
+        Optional<Pair<List<NamedExpression>, Plan>> result
+                = new AddProjectForVolatileExpression().rewriteExpressions(project, project.getProjects());
+
+        Assertions.assertTrue(result.isPresent());
+        LogicalSequence<?> sequenceProject = Assertions.assertInstanceOf(
+                LogicalSequence.class, result.get().second);
+        Alias hidden = sequenceProject.getSequenceAliases().get(0);
+        Assertions.assertEquals(nextVal, hidden.child());
+        Assertions.assertEquals(1, sequenceProject.getSequenceAliases().size());
+        SlotReference first = (SlotReference) ((Alias) result.get().first.get(0)).child();
+        Assertions.assertEquals(first, ((Alias) result.get().first.get(1)).child());
+        Assertions.assertEquals(first, ((Alias) result.get().first.get(2)).child());
+    }
+
+    @Test
+    void testSequenceWithoutFromRewritesOnce() {
+        SequenceValue nextVal = new SequenceValue(1, 10, 3, 20, "db.seq", true);
+        LogicalOneRowRelation oneRow = new LogicalOneRowRelation(
+                StatementScopeIdGenerator.newRelationId(), ImmutableList.of(new Alias(nextVal)));
+
+        Plan root = PlanChecker.from(MemoTestUtils.createConnectContext(), oneRow)
+                .applyTopDown(new AddProjectForVolatileExpression())
+                .getPlan();
+
+        LogicalProject<?> project = Assertions.assertInstanceOf(LogicalProject.class, root);
+        LogicalSequence<?> sequence = Assertions.assertInstanceOf(LogicalSequence.class, project.child());
+        LogicalOneRowRelation source = Assertions.assertInstanceOf(LogicalOneRowRelation.class, sequence.child());
+        Assertions.assertTrue(source.getProjects().isEmpty());
+        Assertions.assertEquals(1, sequence.getSequenceAliases().size());
     }
 
     @Test
