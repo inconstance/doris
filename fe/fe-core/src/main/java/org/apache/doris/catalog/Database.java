@@ -49,10 +49,12 @@ import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Objects;
@@ -99,6 +101,10 @@ public class Database extends MetaObject implements Writable, DatabaseIf<Table> 
     // user define encryptKey for current db
     @SerializedName(value = "dbEncryptKey")
     private DatabaseEncryptKey dbEncryptKey;
+
+    @SerializedName(value = "nameToSequence")
+    private ConcurrentMap<String, Sequence> nameToSequence = Maps.newConcurrentMap();
+    private final ConcurrentMap<Long, Sequence> idToSequence = Maps.newConcurrentMap();
 
     @SerializedName(value = "dataQuotaBytes")
     private volatile long dataQuotaBytes;
@@ -590,6 +596,58 @@ public class Database extends MetaObject implements Writable, DatabaseIf<Table> 
         return db;
     }
 
+    private static String normalizeSequenceName(String name) {
+        return name.toLowerCase(Locale.ROOT);
+    }
+
+    public Sequence getSequenceNullable(String name) {
+        return nameToSequence.get(normalizeSequenceName(name));
+    }
+
+    public Sequence getSequenceNullable(long sequenceId) {
+        return idToSequence.get(sequenceId);
+    }
+
+    public Map<String, Sequence> getSequences() {
+        return Collections.unmodifiableMap(nameToSequence);
+    }
+
+    public boolean registerSequence(Sequence sequence) {
+        Preconditions.checkState(isWriteLockHeldByCurrentThread());
+        String name = normalizeSequenceName(sequence.getName());
+        if (nameToSequence.putIfAbsent(name, sequence) != null) {
+            return false;
+        }
+        if (idToSequence.putIfAbsent(sequence.getId(), sequence) != null) {
+            nameToSequence.remove(name, sequence);
+            return false;
+        }
+        return true;
+    }
+
+    public Sequence unregisterSequence(String name) {
+        Preconditions.checkState(isWriteLockHeldByCurrentThread());
+        Sequence removed = nameToSequence.remove(normalizeSequenceName(name));
+        if (removed != null) {
+            idToSequence.remove(removed.getId(), removed);
+        }
+        return removed;
+    }
+
+    public boolean replaceSequence(Sequence expected, Sequence replacement) {
+        Preconditions.checkState(isWriteLockHeldByCurrentThread());
+        Preconditions.checkArgument(expected.getId() == replacement.getId());
+        String name = normalizeSequenceName(expected.getName());
+        if (!nameToSequence.replace(name, expected, replacement)) {
+            return false;
+        }
+        if (!idToSequence.replace(expected.getId(), expected, replacement)) {
+            nameToSequence.replace(name, replacement, expected);
+            return false;
+        }
+        return true;
+    }
+
     @Override
     public String getSignature(int signatureVersion) {
         StringBuilder sb = new StringBuilder(signatureVersion);
@@ -628,6 +686,10 @@ public class Database extends MetaObject implements Writable, DatabaseIf<Table> 
 
         out.writeLong(replicaQuotaSize);
         dbProperties.write(out);
+        out.writeInt(nameToSequence.size());
+        for (Sequence sequence : nameToSequence.values()) {
+            Text.writeString(out, GsonUtils.GSON.toJson(sequence));
+        }
     }
 
     private void discardHudiTable() {
@@ -695,6 +757,15 @@ public class Database extends MetaObject implements Writable, DatabaseIf<Table> 
             transactionQuotaSize = Config.default_db_max_running_txn_num == -1L
                     ? Config.max_running_txn_num_per_db
                     : Config.default_db_max_running_txn_num;
+        }
+
+        if (Env.getCurrentEnvJournalVersion() >= FeMetaVersion.VERSION_130) {
+            int sequenceCount = in.readInt();
+            for (int i = 0; i < sequenceCount; i++) {
+                Sequence sequence = GsonUtils.GSON.fromJson(Text.readString(in), Sequence.class);
+                nameToSequence.put(normalizeSequenceName(sequence.getName()), sequence);
+                idToSequence.put(sequence.getId(), sequence);
+            }
         }
     }
 

@@ -74,6 +74,7 @@
 #include "pipeline/exec/result_sink_operator.h"
 #include "pipeline/exec/schema_scan_operator.h"
 #include "pipeline/exec/select_operator.h"
+#include "pipeline/exec/sequence_operator.h"
 #include "pipeline/exec/set_probe_sink_operator.h"
 #include "pipeline/exec/set_sink_operator.h"
 #include "pipeline/exec/set_source_operator.h"
@@ -1402,6 +1403,11 @@ Status PipelineXFragmentContext::_create_operator(ObjectPool* pool, const TPlanN
     }
     case TPlanNodeType::ASSERT_NUM_ROWS_NODE: {
         op.reset(new AssertNumRowsOperatorX(pool, tnode, next_operator_id(), descs));
+        RETURN_IF_ERROR(cur_pipe->add_operator(op));
+        break;
+    }
+    case TPlanNodeType::SEQUENCE_NODE: {
+        op.reset(new SequenceOperatorX(pool, tnode, next_operator_id(), descs));
         RETURN_IF_ERROR(cur_pipe->add_operator(op));
         break;
     }

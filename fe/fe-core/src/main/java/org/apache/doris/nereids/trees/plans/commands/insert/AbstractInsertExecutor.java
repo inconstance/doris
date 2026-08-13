@@ -194,6 +194,7 @@ public abstract class AbstractInsertExecutor {
             execImpl(executor, jobId);
             checkStrictModeAndFilterRatio();
             onComplete();
+            coordinator.commitSequenceCurrvals();
         } catch (Throwable t) {
             onFail(t);
             return;

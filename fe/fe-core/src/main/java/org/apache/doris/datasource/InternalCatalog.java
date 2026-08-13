@@ -72,6 +72,7 @@ import org.apache.doris.catalog.DistributionInfo.DistributionInfoType;
 import org.apache.doris.catalog.DynamicPartitionProperty;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.EsTable;
+import org.apache.doris.catalog.ExternalSequenceAllocator;
 import org.apache.doris.catalog.Function;
 import org.apache.doris.catalog.HashDistributionInfo;
 import org.apache.doris.catalog.Index;
@@ -103,6 +104,7 @@ import org.apache.doris.catalog.Replica;
 import org.apache.doris.catalog.Replica.ReplicaState;
 import org.apache.doris.catalog.ReplicaAllocation;
 import org.apache.doris.catalog.ScalarType;
+import org.apache.doris.catalog.Sequence;
 import org.apache.doris.catalog.SinglePartitionInfo;
 import org.apache.doris.catalog.Table;
 import org.apache.doris.catalog.TableIf;
@@ -152,6 +154,7 @@ import org.apache.doris.persist.DropPartitionInfo;
 import org.apache.doris.persist.PartitionPersistInfo;
 import org.apache.doris.persist.RecoverInfo;
 import org.apache.doris.persist.ReplicaPersistInfo;
+import org.apache.doris.persist.SequencePersistInfo;
 import org.apache.doris.persist.TruncateTableInfo;
 import org.apache.doris.qe.ConnectContext;
 import org.apache.doris.resource.Tag;
@@ -187,6 +190,7 @@ import org.jetbrains.annotations.Nullable;
 
 import java.io.DataInputStream;
 import java.io.IOException;
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -3665,6 +3669,136 @@ public class InternalCatalog implements CatalogIf<Database> {
         Database db = getDbOrMetaException(log.getDbId());
         OlapTable olapTable = (OlapTable) db.getTableOrMetaException(log.getTableId(), TableType.OLAP);
         olapTable.getAutoIncrementGenerator().applyChange(log.getColumnId(), log.getBatchEndId());
+    }
+
+    public void createSequence(Sequence sequence, boolean ifNotExists) throws DdlException {
+        Database db = getDbOrDdlException(sequence.getDbId());
+        db.writeLock();
+        try {
+            Sequence existing = db.getSequenceNullable(sequence.getName());
+            if (existing != null) {
+                if (ifNotExists) {
+                    return;
+                }
+                throw new DdlException("Sequence already exists: " + sequence.getName());
+            }
+            if (!db.registerSequence(sequence)) {
+                throw new DdlException("Sequence id already exists: " + sequence.getId());
+            }
+            Env.getCurrentEnv().getEditLog().logCreateSequence(SequencePersistInfo.create(sequence));
+        } finally {
+            db.writeUnlock();
+        }
+    }
+
+    public void dropSequence(long dbId, String sequenceName, boolean ifExists) throws DdlException {
+        Database db = getDbOrDdlException(dbId);
+        db.writeLock();
+        try {
+            Sequence existing = db.getSequenceNullable(sequenceName);
+            if (existing == null) {
+                if (ifExists) {
+                    return;
+                }
+                throw new DdlException("Unknown sequence: " + sequenceName);
+            }
+            db.unregisterSequence(sequenceName);
+            Env.getCurrentEnv().getEditLog().logDropSequence(
+                    SequencePersistInfo.drop(dbId, existing.getId(), existing.getName()));
+        } finally {
+            db.writeUnlock();
+        }
+    }
+
+    public Sequence alterSequence(long dbId, String sequenceName, BigInteger increment, BigInteger minValue,
+            BigInteger maxValue, Long cacheSize, Boolean cycle, boolean restart, BigInteger restartValue)
+            throws UserException {
+        Database db = getDbOrDdlException(dbId);
+        db.writeLock();
+        try {
+            Sequence existing = db.getSequenceNullable(sequenceName);
+            if (existing == null) {
+                throw new DdlException("Unknown sequence: " + sequenceName);
+            }
+            synchronized (existing) {
+                Sequence altered = existing.alteredCopy(increment, minValue, maxValue, cacheSize, cycle,
+                        restart, restartValue);
+                Env.getCurrentEnv().getEditLog().logAlterSequence(SequencePersistInfo.create(altered));
+                if (!db.replaceSequence(existing, altered)) {
+                    throw new DdlException("Sequence changed concurrently: " + sequenceName);
+                }
+                return altered;
+            }
+        } finally {
+            db.writeUnlock();
+        }
+    }
+
+    public Sequence.AllocationResult allocateSequenceRange(long dbId, long sequenceId,
+            long count, long expectedVersion) throws UserException {
+        Database db = getDbOrMetaException(dbId);
+        db.readLock();
+        try {
+            Sequence sequence = db.getSequenceNullable(sequenceId);
+            if (sequence == null) {
+                throw new MetaNotFoundException("Unknown sequence id: " + sequenceId);
+            }
+            if ("EXTERNAL".equalsIgnoreCase(Config.sequence_allocator_type)) {
+                return ExternalSequenceAllocator.allocate(db.getFullName(), sequence, count, expectedVersion);
+            }
+            if (!"LOCAL".equalsIgnoreCase(Config.sequence_allocator_type)) {
+                throw new UserException("Unknown sequence_allocator_type: " + Config.sequence_allocator_type);
+            }
+            return sequence.allocate(count, expectedVersion, (id, version, state) ->
+                    Env.getCurrentEnv().getEditLog().logUpdateSequenceState(
+                            SequencePersistInfo.state(dbId, id, version, state)));
+        } finally {
+            db.readUnlock();
+        }
+    }
+
+    public void replayCreateSequence(SequencePersistInfo info) throws MetaNotFoundException {
+        Database db = getDbOrMetaException(info.getDbId());
+        db.writeLock();
+        try {
+            db.registerSequence(info.getSequence());
+        } finally {
+            db.writeUnlock();
+        }
+    }
+
+    public void replayAlterSequence(SequencePersistInfo info) throws MetaNotFoundException {
+        Database db = getDbOrMetaException(info.getDbId());
+        db.writeLock();
+        try {
+            Sequence existing = db.getSequenceNullable(info.getSequenceId());
+            if (existing != null && existing.getVersion() < info.getSequenceVersion()) {
+                db.replaceSequence(existing, info.getSequence());
+            }
+        } finally {
+            db.writeUnlock();
+        }
+    }
+
+    public void replayDropSequence(SequencePersistInfo info) throws MetaNotFoundException {
+        Database db = getDbOrMetaException(info.getDbId());
+        db.writeLock();
+        try {
+            Sequence existing = db.getSequenceNullable(info.getSequenceId());
+            if (existing != null) {
+                db.unregisterSequence(existing.getName());
+            }
+        } finally {
+            db.writeUnlock();
+        }
+    }
+
+    public void replayUpdateSequenceState(SequencePersistInfo info) throws MetaNotFoundException {
+        Database db = getDbOrMetaException(info.getDbId());
+        Sequence sequence = db.getSequenceNullable(info.getSequenceId());
+        if (sequence != null) {
+            sequence.replayState(info.getAllocationState(), info.getSequenceVersion());
+        }
     }
 
     @Override

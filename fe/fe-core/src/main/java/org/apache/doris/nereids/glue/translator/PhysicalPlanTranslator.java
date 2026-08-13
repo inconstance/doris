@@ -83,6 +83,7 @@ import org.apache.doris.nereids.rules.rewrite.MergeLimits;
 import org.apache.doris.nereids.stats.StatsErrorEstimator;
 import org.apache.doris.nereids.trees.UnaryNode;
 import org.apache.doris.nereids.trees.expressions.AggregateExpression;
+import org.apache.doris.nereids.trees.expressions.Alias;
 import org.apache.doris.nereids.trees.expressions.CTEId;
 import org.apache.doris.nereids.trees.expressions.EqualPredicate;
 import org.apache.doris.nereids.trees.expressions.ExprId;
@@ -140,6 +141,7 @@ import org.apache.doris.nereids.trees.plans.physical.PhysicalQuickSort;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalRepeat;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalResultSink;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalSchemaScan;
+import org.apache.doris.nereids.trees.plans.physical.PhysicalSequence;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalSetOperation;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalStorageLayerAggregate;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalTVFRelation;
@@ -187,6 +189,7 @@ import org.apache.doris.planner.ResultSink;
 import org.apache.doris.planner.ScanNode;
 import org.apache.doris.planner.SchemaScanNode;
 import org.apache.doris.planner.SelectNode;
+import org.apache.doris.planner.SequenceNode;
 import org.apache.doris.planner.SetOperationNode;
 import org.apache.doris.planner.SortNode;
 import org.apache.doris.planner.TableFunctionNode;
@@ -200,6 +203,7 @@ import org.apache.doris.thrift.TPartitionType;
 import org.apache.doris.thrift.TPushAggOp;
 import org.apache.doris.thrift.TResultSinkType;
 import org.apache.doris.thrift.TRuntimeFilterType;
+import org.apache.doris.thrift.TSequenceSpec;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
@@ -212,6 +216,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.jetbrains.annotations.NotNull;
 
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -2019,6 +2024,34 @@ public class PhysicalPlanTranslator extends DefaultPlanVisitor<PlanFragment, Pla
             inputPlanNode.setOutputTupleDesc(tupleDescriptor);
         }
         return inputFragment;
+    }
+
+    @Override
+    public PlanFragment visitPhysicalSequence(PhysicalSequence<? extends Plan> sequence,
+            PlanTranslatorContext context) {
+        PlanFragment fragment = sequence.child().accept(this, context);
+        List<Slot> slots = sequence.getSequenceAliases().stream()
+                .map(Alias::toSlot).collect(Collectors.toList());
+        TupleDescriptor tuple = generateTupleDesc(slots, null, context);
+        List<TSequenceSpec> specs = Lists.newArrayListWithCapacity(sequence.getSequenceAliases().size());
+        for (int i = 0; i < sequence.getSequenceAliases().size(); i++) {
+            org.apache.doris.nereids.trees.expressions.SequenceValue value =
+                    (org.apache.doris.nereids.trees.expressions.SequenceValue)
+                            sequence.getSequenceAliases().get(i).child(0);
+            TSequenceSpec spec = new TSequenceSpec(value.getDbId(), value.getSequenceId(),
+                    value.getSequenceVersion(), tuple.getSlots().get(i).getId().asInt(),
+                    value.isNextVal(), value.getCacheSize());
+            if (!value.isNextVal()) {
+                BigInteger currval = ConnectContext.get().getSequenceCurrval(value.getSequenceId())
+                        .orElseThrow(() -> new org.apache.doris.nereids.exceptions.AnalysisException(
+                                "CURRVAL is not yet defined in this session for sequence " + value.toSql()));
+                spec.setSessionCurrval(currval.toString());
+            }
+            specs.add(spec);
+        }
+        SequenceNode node = new SequenceNode(context.nextPlanNodeId(), fragment.getPlanRoot(), tuple.getId(), specs);
+        addPlanRoot(fragment, node, sequence);
+        return fragment;
     }
 
     /**

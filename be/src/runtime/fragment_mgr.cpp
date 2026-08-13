@@ -415,6 +415,20 @@ void FragmentMgr::coordinator_callback(const ReportStatusRequest& req) {
 
     DCHECK(req.runtime_state != nullptr);
 
+    if (auto usages = req.runtime_state->sequence_usages(); !usages.empty()) {
+        params.__set_sequence_usages(usages);
+    }
+    for (auto* state : req.runtime_states) {
+        if (state == req.runtime_state) {
+            continue;
+        }
+        auto usages = state->sequence_usages();
+        if (!usages.empty()) {
+            params.__isset.sequence_usages = true;
+            params.sequence_usages.insert(params.sequence_usages.end(), usages.begin(), usages.end());
+        }
+    }
+
     if (req.runtime_state->query_type() == TQueryType::LOAD && !req.done && req.status.ok()) {
         // this is a load plan, and load is not finished, just make a brief report
         params.__set_loaded_rows(req.runtime_state->num_rows_load_total());

@@ -219,6 +219,7 @@ import org.apache.doris.persist.RecoverInfo;
 import org.apache.doris.persist.RefreshExternalTableInfo;
 import org.apache.doris.persist.ReplacePartitionOperationLog;
 import org.apache.doris.persist.ReplicaPersistInfo;
+import org.apache.doris.persist.SequencePersistInfo;
 import org.apache.doris.persist.SetPartitionVersionOperationLog;
 import org.apache.doris.persist.SetReplicaStatusOperationLog;
 import org.apache.doris.persist.SetReplicaVersionOperationLog;
@@ -6419,6 +6420,22 @@ public class Env {
 
     public void replayAutoIncrementIdUpdateLog(AutoIncrementIdUpdateLog log) throws Exception {
         getInternalCatalog().replayAutoIncrementIdUpdateLog(log);
+    }
+
+    public void replayCreateSequence(SequencePersistInfo info) throws Exception {
+        getInternalCatalog().replayCreateSequence(info);
+    }
+
+    public void replayAlterSequence(SequencePersistInfo info) throws Exception {
+        getInternalCatalog().replayAlterSequence(info);
+    }
+
+    public void replayDropSequence(SequencePersistInfo info) throws Exception {
+        getInternalCatalog().replayDropSequence(info);
+    }
+
+    public void replayUpdateSequenceState(SequencePersistInfo info) throws Exception {
+        getInternalCatalog().replayUpdateSequenceState(info);
     }
 
     public ColumnIdFlushDaemon getColumnIdFlusher() {

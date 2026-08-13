@@ -19,6 +19,11 @@ package org.apache.doris.common;
 
 public class Config extends ConfigBase {
 
+    @ConfField(description = {"Sequence 号段分配器类型，LOCAL 表示由 FE 分配，EXTERNAL 表示由外部服务分配",
+            "Sequence range allocator type. LOCAL allocates ranges in FE; EXTERNAL delegates to an external service"},
+            options = {"LOCAL", "EXTERNAL"})
+    public static String sequence_allocator_type = "LOCAL";
+
     @ConfField(description = {"用户自定义配置文件的路径，用于存放 fe_custom.conf。该文件中的配置会覆盖 fe.conf 中的配置",
             "The path of the user-defined configuration file, used to store fe_custom.conf. "
                     + "The configuration in this file will override the configuration in fe.conf"})

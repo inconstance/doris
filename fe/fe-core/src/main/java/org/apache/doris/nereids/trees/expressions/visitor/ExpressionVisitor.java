@@ -20,6 +20,7 @@ package org.apache.doris.nereids.trees.expressions.visitor;
 import org.apache.doris.nereids.analyzer.PlaceholderExpression;
 import org.apache.doris.nereids.analyzer.UnboundAlias;
 import org.apache.doris.nereids.analyzer.UnboundFunction;
+import org.apache.doris.nereids.analyzer.UnboundSequenceValue;
 import org.apache.doris.nereids.analyzer.UnboundSlot;
 import org.apache.doris.nereids.analyzer.UnboundStar;
 import org.apache.doris.nereids.analyzer.UnboundVariable;
@@ -72,6 +73,7 @@ import org.apache.doris.nereids.trees.expressions.OrderExpression;
 import org.apache.doris.nereids.trees.expressions.Placeholder;
 import org.apache.doris.nereids.trees.expressions.Properties;
 import org.apache.doris.nereids.trees.expressions.ScalarSubquery;
+import org.apache.doris.nereids.trees.expressions.SequenceValue;
 import org.apache.doris.nereids.trees.expressions.Slot;
 import org.apache.doris.nereids.trees.expressions.SlotReference;
 import org.apache.doris.nereids.trees.expressions.SubqueryExpr;
@@ -536,6 +538,14 @@ public abstract class ExpressionVisitor<R, C>
 
     public R visitUnboundVariable(UnboundVariable unboundVariable, C context) {
         return visit(unboundVariable, context);
+    }
+
+    public R visitUnboundSequenceValue(UnboundSequenceValue value, C context) {
+        return visit(value, context);
+    }
+
+    public R visitSequenceValue(SequenceValue value, C context) {
+        return visit(value, context);
     }
 
     /* ********************************************************************************************

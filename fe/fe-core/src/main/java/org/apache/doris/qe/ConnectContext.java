@@ -76,6 +76,7 @@ import org.json.JSONObject;
 import org.xnio.StreamConnection;
 
 import java.io.IOException;
+import java.math.BigInteger;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -156,6 +157,8 @@ public class ConnectContext {
     protected volatile SessionVariable sessionVariable;
     // Store user variable in this connection
     private Map<String, LiteralExpr> userVars = new HashMap<>();
+    // Key by immutable object id so DROP + CREATE of the same name cannot inherit CURRVAL.
+    private final Map<Long, SequenceCurrval> sequenceCurrvals = new HashMap<>();
     // Scheduler this connection belongs to
     protected volatile ConnectScheduler connectScheduler;
     // Executor
@@ -359,6 +362,7 @@ public class ConnectContext {
         isKilled = false;
         sessionVariable = VariableMgr.newSessionVariable();
         userVars = new HashMap<>();
+        sequenceCurrvals.clear();
         command = MysqlCommand.COM_SLEEP;
         if (Config.use_fuzzy_session_variable) {
             sessionVariable.initFuzzyModeVariables();
@@ -905,6 +909,36 @@ public class ConnectContext {
 
     public StatementContext getStatementContext() {
         return statementContext;
+    }
+
+    /** Publish a NEXTVAL only after its complete statement succeeds. */
+    public synchronized void updateSequenceCurrval(long sequenceId, BigInteger value,
+            long sequenceVersion, long allocationTicket, long consumedIndex) {
+        SequenceCurrval previous = sequenceCurrvals.get(sequenceId);
+        if (previous == null || allocationTicket > previous.allocationTicket
+                || (allocationTicket == previous.allocationTicket && consumedIndex > previous.consumedIndex)) {
+            sequenceCurrvals.put(sequenceId,
+                    new SequenceCurrval(value, sequenceVersion, allocationTicket, consumedIndex));
+        }
+    }
+
+    public synchronized Optional<BigInteger> getSequenceCurrval(long sequenceId) {
+        SequenceCurrval value = sequenceCurrvals.get(sequenceId);
+        return value == null ? Optional.empty() : Optional.of(value.value);
+    }
+
+    private static class SequenceCurrval {
+        private final BigInteger value;
+        private final long sequenceVersion;
+        private final long allocationTicket;
+        private final long consumedIndex;
+
+        private SequenceCurrval(BigInteger value, long sequenceVersion, long allocationTicket, long consumedIndex) {
+            this.value = value;
+            this.sequenceVersion = sequenceVersion;
+            this.allocationTicket = allocationTicket;
+            this.consumedIndex = consumedIndex;
+        }
     }
 
     public void setStatementContext(StatementContext statementContext) {

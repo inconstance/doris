@@ -91,6 +91,7 @@ import org.apache.doris.nereids.rules.implementation.LogicalProjectToPhysicalPro
 import org.apache.doris.nereids.rules.implementation.LogicalRepeatToPhysicalRepeat;
 import org.apache.doris.nereids.rules.implementation.LogicalResultSinkToPhysicalResultSink;
 import org.apache.doris.nereids.rules.implementation.LogicalSchemaScanToPhysicalSchemaScan;
+import org.apache.doris.nereids.rules.implementation.LogicalSequenceToPhysicalSequence;
 import org.apache.doris.nereids.rules.implementation.LogicalSortToPhysicalQuickSort;
 import org.apache.doris.nereids.rules.implementation.LogicalTVFRelationToPhysicalTVFRelation;
 import org.apache.doris.nereids.rules.implementation.LogicalTopNToPhysicalTopN;
@@ -210,6 +211,7 @@ public class RuleSet {
             .add(new LogicalExceptToPhysicalExcept())
             .add(new LogicalIntersectToPhysicalIntersect())
             .add(new LogicalGenerateToPhysicalGenerate())
+            .add(new LogicalSequenceToPhysicalSequence())
             .add(new LogicalOlapTableSinkToPhysicalOlapTableSink())
             .add(new LogicalHiveTableSinkToPhysicalHiveTableSink())
             .add(new LogicalIcebergTableSinkToPhysicalIcebergTableSink())

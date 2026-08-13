@@ -47,6 +47,7 @@ statementBase
     | supportedDmlStatement             #supportedDmlStatementAlias
     | supportedCreateStatement          #supportedCreateStatementAlias
     | supportedAlterStatement           #supportedAlterStatementAlias
+    | supportedDropStatement            #supportedDropStatementAlias
     | materializedViewStatement         #materializedViewStatementAlias
     | supportedJobStatement             #supportedJobStatementAlias
     | constraintStatement               #constraintStatementAlias
@@ -150,7 +151,8 @@ supportedDmlStatement
     ;
 
 supportedCreateStatement
-    : CREATE (EXTERNAL)? TABLE (IF NOT EXISTS)? name=multipartIdentifier
+    : CREATE SEQUENCE (IF NOT EXISTS)? name=multipartIdentifier sequenceOption*       #createSequence
+    | CREATE (EXTERNAL)? TABLE (IF NOT EXISTS)? name=multipartIdentifier
         ((ctasCols=identifierList)? | (LEFT_PAREN columnDefs (COMMA indexDefs)? COMMA? RIGHT_PAREN))
         (ENGINE EQ engine=identifier)?
         ((AGGREGATE | UNIQUE | DUPLICATE) KEY keys=identifierList
@@ -177,12 +179,40 @@ supportedCreateStatement
     ;
 
 supportedAlterStatement
-    : ALTER VIEW name=multipartIdentifier (LEFT_PAREN cols=simpleColumnDefs RIGHT_PAREN)?
+    : ALTER SEQUENCE name=multipartIdentifier alterSequenceClause+                   #alterSequence
+    | ALTER VIEW name=multipartIdentifier (LEFT_PAREN cols=simpleColumnDefs RIGHT_PAREN)?
         AS query                                                          #alterView
     ;
 
+supportedDropStatement
+    : DROP SEQUENCE (IF EXISTS)? name=multipartIdentifier                            #dropSequence
+    ;
+
+sequenceOption
+    : START WITH start=sequenceInteger
+    | INCREMENT BY increment=sequenceInteger
+    | MINVALUE min=sequenceInteger
+    | NOMINVALUE
+    | MAXVALUE max=sequenceInteger
+    | NOMAXVALUE
+    | CACHE cache=INTEGER_VALUE
+    | NOCACHE
+    | CYCLE
+    | NOCYCLE
+    ;
+
+sequenceInteger
+    : SUBTRACT? INTEGER_VALUE
+    ;
+
+alterSequenceClause
+    : RESTART (WITH restart=sequenceInteger)?
+    | sequenceOption
+    ;
+
 supportedShowStatement
-    : SHOW VIEW
+    : SHOW CREATE SEQUENCE name=multipartIdentifier                                 #showCreateSequence
+    | SHOW VIEW
         (FROM |IN) tableName=multipartIdentifier
         ((FROM | IN) database=identifier)?                                          #showView
     ;

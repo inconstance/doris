@@ -30,4 +30,7 @@ public interface CoordInterface {
     // When call exec or get next data finished, should call this method to release
     // some resource.
     public default void close() {}
+
+    /** Publish statement-scoped Sequence usage after the complete statement succeeds. */
+    public default void commitSequenceCurrvals() {}
 }

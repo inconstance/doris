@@ -212,6 +212,7 @@ import org.apache.doris.nereids.analyzer.UnboundFunction;
 import org.apache.doris.nereids.analyzer.UnboundOneRowRelation;
 import org.apache.doris.nereids.analyzer.UnboundRelation;
 import org.apache.doris.nereids.analyzer.UnboundResultSink;
+import org.apache.doris.nereids.analyzer.UnboundSequenceValue;
 import org.apache.doris.nereids.analyzer.UnboundSlot;
 import org.apache.doris.nereids.analyzer.UnboundStar;
 import org.apache.doris.nereids.analyzer.UnboundTVFRelation;
@@ -364,6 +365,7 @@ import org.apache.doris.nereids.trees.plans.algebra.Aggregate;
 import org.apache.doris.nereids.trees.plans.algebra.SetOperation.Qualifier;
 import org.apache.doris.nereids.trees.plans.commands.AddConstraintCommand;
 import org.apache.doris.nereids.trees.plans.commands.AlterMTMVCommand;
+import org.apache.doris.nereids.trees.plans.commands.AlterSequenceCommand;
 import org.apache.doris.nereids.trees.plans.commands.AlterViewCommand;
 import org.apache.doris.nereids.trees.plans.commands.CallCommand;
 import org.apache.doris.nereids.trees.plans.commands.CancelMTMVTaskCommand;
@@ -373,6 +375,7 @@ import org.apache.doris.nereids.trees.plans.commands.CreateJobCommand;
 import org.apache.doris.nereids.trees.plans.commands.CreateMTMVCommand;
 import org.apache.doris.nereids.trees.plans.commands.CreatePolicyCommand;
 import org.apache.doris.nereids.trees.plans.commands.CreateProcedureCommand;
+import org.apache.doris.nereids.trees.plans.commands.CreateSequenceCommand;
 import org.apache.doris.nereids.trees.plans.commands.CreateTableCommand;
 import org.apache.doris.nereids.trees.plans.commands.CreateTableLikeCommand;
 import org.apache.doris.nereids.trees.plans.commands.CreateViewCommand;
@@ -381,6 +384,7 @@ import org.apache.doris.nereids.trees.plans.commands.DeleteFromUsingCommand;
 import org.apache.doris.nereids.trees.plans.commands.DropConstraintCommand;
 import org.apache.doris.nereids.trees.plans.commands.DropMTMVCommand;
 import org.apache.doris.nereids.trees.plans.commands.DropProcedureCommand;
+import org.apache.doris.nereids.trees.plans.commands.DropSequenceCommand;
 import org.apache.doris.nereids.trees.plans.commands.ExplainCommand;
 import org.apache.doris.nereids.trees.plans.commands.ExplainCommand.ExplainLevel;
 import org.apache.doris.nereids.trees.plans.commands.ExportCommand;
@@ -391,6 +395,7 @@ import org.apache.doris.nereids.trees.plans.commands.ResumeMTMVCommand;
 import org.apache.doris.nereids.trees.plans.commands.ShowConstraintsCommand;
 import org.apache.doris.nereids.trees.plans.commands.ShowCreateMTMVCommand;
 import org.apache.doris.nereids.trees.plans.commands.ShowCreateProcedureCommand;
+import org.apache.doris.nereids.trees.plans.commands.ShowCreateSequenceCommand;
 import org.apache.doris.nereids.trees.plans.commands.ShowProcedureStatusCommand;
 import org.apache.doris.nereids.trees.plans.commands.ShowViewCommand;
 import org.apache.doris.nereids.trees.plans.commands.UnsupportedCommand;
@@ -485,6 +490,7 @@ import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -2338,7 +2344,14 @@ public class LogicalPlanBuilder extends DorisParserBaseVisitor<Object> {
             if (e instanceof UnboundSlot) {
                 UnboundSlot unboundAttribute = (UnboundSlot) e;
                 List<String> nameParts = Lists.newArrayList(unboundAttribute.getNameParts());
-                nameParts.add(ctx.fieldName.getText());
+                String fieldName = ctx.fieldName.getText();
+                if (fieldName.equalsIgnoreCase("NEXTVAL") || fieldName.equalsIgnoreCase("CURRVAL")) {
+                    if (nameParts.size() > 2) {
+                        throw new ParseException("Sequence pseudocolumn accepts [db.]sequence_name", ctx);
+                    }
+                    return new UnboundSequenceValue(nameParts, fieldName.equalsIgnoreCase("NEXTVAL"));
+                }
+                nameParts.add(fieldName);
                 UnboundSlot slot = new UnboundSlot(nameParts, Optional.empty());
                 return slot;
             } else {
@@ -3717,5 +3730,95 @@ public class LogicalPlanBuilder extends DorisParserBaseVisitor<Object> {
             databaseName = stripQuotes(ctx.database.getText());
         }
         return new ShowViewCommand(databaseName, new TableNameInfo(tableNameParts));
+    }
+
+    @Override
+    public LogicalPlan visitCreateSequence(DorisParser.CreateSequenceContext ctx) {
+        EnumMap<CreateSequenceCommand.Option, String> options = new EnumMap<>(CreateSequenceCommand.Option.class);
+        for (DorisParser.SequenceOptionContext option : ctx.sequenceOption()) {
+            applySequenceOption(options, option, true);
+        }
+        return new CreateSequenceCommand(visitMultipartIdentifier(ctx.name), ctx.EXISTS() != null, options);
+    }
+
+    @Override
+    public LogicalPlan visitAlterSequence(DorisParser.AlterSequenceContext ctx) {
+        EnumMap<CreateSequenceCommand.Option, String> options = new EnumMap<>(CreateSequenceCommand.Option.class);
+        boolean restart = false;
+        BigInteger restartValue = null;
+        for (DorisParser.AlterSequenceClauseContext clause : ctx.alterSequenceClause()) {
+            if (clause.RESTART() != null) {
+                if (restart) {
+                    throw new ParseException("Duplicate sequence option RESTART", clause);
+                }
+                restart = true;
+                restartValue = clause.restart == null ? null : new BigInteger(clause.restart.getText());
+            } else {
+                applySequenceOption(options, clause.sequenceOption(), false);
+            }
+        }
+        return new AlterSequenceCommand(visitMultipartIdentifier(ctx.name), options, restart, restartValue);
+    }
+
+    @Override
+    public LogicalPlan visitDropSequence(DorisParser.DropSequenceContext ctx) {
+        return new DropSequenceCommand(visitMultipartIdentifier(ctx.name), ctx.EXISTS() != null);
+    }
+
+    @Override
+    public LogicalPlan visitShowCreateSequence(DorisParser.ShowCreateSequenceContext ctx) {
+        return new ShowCreateSequenceCommand(visitMultipartIdentifier(ctx.name));
+    }
+
+    private void applySequenceOption(Map<CreateSequenceCommand.Option, String> options,
+            DorisParser.SequenceOptionContext option, boolean allowStart) {
+        if (option.start != null) {
+            if (!allowStart) {
+                throw new ParseException("ALTER SEQUENCE uses RESTART WITH instead of START WITH", option);
+            }
+            putSequenceOption(options, CreateSequenceCommand.Option.START, option.start.getText(), option);
+        } else if (option.increment != null) {
+            putSequenceOption(options, CreateSequenceCommand.Option.INCREMENT, option.increment.getText(), option);
+        } else if (option.MINVALUE() != null) {
+            putExclusiveSequenceOption(options, CreateSequenceCommand.Option.MINVALUE,
+                    CreateSequenceCommand.Option.NOMINVALUE, option.min.getText(), option);
+        } else if (option.NOMINVALUE() != null) {
+            putExclusiveSequenceOption(options, CreateSequenceCommand.Option.NOMINVALUE,
+                    CreateSequenceCommand.Option.MINVALUE, "", option);
+        } else if (option.MAXVALUE() != null) {
+            putExclusiveSequenceOption(options, CreateSequenceCommand.Option.MAXVALUE,
+                    CreateSequenceCommand.Option.NOMAXVALUE, option.max.getText(), option);
+        } else if (option.NOMAXVALUE() != null) {
+            putExclusiveSequenceOption(options, CreateSequenceCommand.Option.NOMAXVALUE,
+                    CreateSequenceCommand.Option.MAXVALUE, "", option);
+        } else if (option.CACHE() != null) {
+            putExclusiveSequenceOption(options, CreateSequenceCommand.Option.CACHE,
+                    CreateSequenceCommand.Option.NOCACHE, option.cache.getText(), option);
+        } else if (option.NOCACHE() != null) {
+            putExclusiveSequenceOption(options, CreateSequenceCommand.Option.NOCACHE,
+                    CreateSequenceCommand.Option.CACHE, "", option);
+        } else if (option.CYCLE() != null) {
+            putExclusiveSequenceOption(options, CreateSequenceCommand.Option.CYCLE,
+                    CreateSequenceCommand.Option.NOCYCLE, "", option);
+        } else {
+            putExclusiveSequenceOption(options, CreateSequenceCommand.Option.NOCYCLE,
+                    CreateSequenceCommand.Option.CYCLE, "", option);
+        }
+    }
+
+    private void putSequenceOption(Map<CreateSequenceCommand.Option, String> options,
+            CreateSequenceCommand.Option key, String value, ParserRuleContext ctx) {
+        if (options.putIfAbsent(key, value) != null) {
+            throw new ParseException("Duplicate sequence option " + key, ctx);
+        }
+    }
+
+    private void putExclusiveSequenceOption(Map<CreateSequenceCommand.Option, String> options,
+            CreateSequenceCommand.Option key, CreateSequenceCommand.Option opposite,
+            String value, ParserRuleContext ctx) {
+        if (options.containsKey(opposite)) {
+            throw new ParseException("Conflicting sequence options " + key + " and " + opposite, ctx);
+        }
+        putSequenceOption(options, key, value, ctx);
     }
 }

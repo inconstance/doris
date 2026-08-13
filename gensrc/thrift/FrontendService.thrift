@@ -429,6 +429,15 @@ struct TFragmentInstanceReport {
   4: optional i64 loaded_bytes
 }
 
+// Last value consumed by one fragment allocation. Sequence values are canonical decimal strings.
+struct TSequenceUsage {
+  1: required i64 sequence_id
+  2: required string last_consumed_value
+  3: required i64 sequence_version
+  4: required i64 allocation_ticket
+  5: required i64 consumed_index
+}
+
 // The results of an INSERT query, sent to the coordinator as part of
 // TReportExecStatusParams
 struct TReportExecStatusParams {
@@ -501,6 +510,7 @@ struct TReportExecStatusParams {
   28: optional list<DataSinks.TIcebergCommitData> iceberg_commit_datas
 
   31: optional list<TFragmentInstanceReport> fragment_instance_reports;
+  32: optional list<TSequenceUsage> sequence_usages
 }
 
 struct TFeResult {
@@ -1481,6 +1491,31 @@ struct TAutoIncrementRangeResult {
     4: optional Types.TNetworkAddress master_address
 }
 
+struct TSequenceRangeRequest {
+    1: required i64 db_id
+    2: required i64 sequence_id
+    3: required i64 count
+    4: required i64 sequence_version
+    5: optional Types.TUniqueId query_id
+    6: optional Types.TUniqueId fragment_instance_id
+    7: optional Types.TUniqueId request_id
+}
+
+struct TSequenceRangeSegment {
+    1: required string start_value
+    2: required string increment
+    3: required i64 count
+    4: required i64 cycle_epoch
+}
+
+struct TSequenceRangeResult {
+    1: required Status.TStatus status
+    2: optional list<TSequenceRangeSegment> segments
+    3: optional i64 sequence_version
+    4: optional i64 allocation_ticket
+    5: optional Types.TNetworkAddress master_address
+}
+
 struct TCreatePartitionRequest {
     1: optional i64 txn_id
     2: optional i64 db_id
@@ -1755,6 +1790,7 @@ service FrontendService {
     Status.TStatus updateStatsCache(1: TUpdateFollowerStatsCacheRequest request)
 
     TAutoIncrementRangeResult getAutoIncrementRange(1: TAutoIncrementRangeRequest request)
+    TSequenceRangeResult getSequenceRange(1: TSequenceRangeRequest request)
 
     TCreatePartitionResult createPartition(1: TCreatePartitionRequest request)
     // insert overwrite partition(*)

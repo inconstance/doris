@@ -118,6 +118,7 @@ import org.apache.doris.thrift.TScanRange;
 import org.apache.doris.thrift.TScanRangeLocation;
 import org.apache.doris.thrift.TScanRangeLocations;
 import org.apache.doris.thrift.TScanRangeParams;
+import org.apache.doris.thrift.TSequenceUsage;
 import org.apache.doris.thrift.TStatusCode;
 import org.apache.doris.thrift.TTabletCommitInfo;
 import org.apache.doris.thrift.TUniqueId;
@@ -145,6 +146,7 @@ import org.apache.thrift.protocol.TCompactProtocol;
 import org.jetbrains.annotations.NotNull;
 import org.joda.time.DateTime;
 
+import java.math.BigInteger;
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -251,6 +253,7 @@ public class Coordinator implements CoordInterface {
 
     private final List<TTabletCommitInfo> commitInfos = Lists.newArrayList();
     private final List<TErrorTabletInfo> errorTabletInfos = Lists.newArrayList();
+    private final Map<Long, TSequenceUsage> pendingSequenceUsages = Maps.newHashMap();
 
     // Input parameter
     private long jobId = -1; // job which this task belongs to
@@ -2844,6 +2847,30 @@ public class Coordinator implements CoordInterface {
                         params.getQueryId(), params.getFragmentInstanceId(), params.getFinishedScanRanges());
             }
         }
+        if (params.isDone() && params.isSetSequenceUsages()) {
+            synchronized (pendingSequenceUsages) {
+                for (TSequenceUsage usage : params.getSequenceUsages()) {
+                    TSequenceUsage previous = pendingSequenceUsages.get(usage.getSequenceId());
+                    if (previous == null || usage.getAllocationTicket() > previous.getAllocationTicket()
+                            || (usage.getAllocationTicket() == previous.getAllocationTicket()
+                            && usage.getConsumedIndex() > previous.getConsumedIndex())) {
+                        pendingSequenceUsages.put(usage.getSequenceId(), usage);
+                    }
+                }
+            }
+        }
+    }
+
+    @Override
+    public void commitSequenceCurrvals() {
+        synchronized (pendingSequenceUsages) {
+            for (TSequenceUsage usage : pendingSequenceUsages.values()) {
+                context.updateSequenceCurrval(usage.getSequenceId(),
+                        new BigInteger(usage.getLastConsumedValue()), usage.getSequenceVersion(),
+                        usage.getAllocationTicket(), usage.getConsumedIndex());
+            }
+            pendingSequenceUsages.clear();
+        }
     }
 
     /*
@@ -4277,4 +4304,3 @@ public class Coordinator implements CoordInterface {
                 .ifPresent(profileAction);
     }
 }
-

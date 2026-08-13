@@ -24,6 +24,8 @@ import org.apache.doris.nereids.trees.plans.Plan;
  * Type of rules, each rule has its unique type.
  */
 public enum RuleType {
+    BIND_SEQUENCE_VALUE(RuleTypeClass.REWRITE),
+    CHECK_SEQUENCE_USAGE(RuleTypeClass.REWRITE),
     // just for UT
     TEST_REWRITE(RuleTypeClass.REWRITE),
 
@@ -466,6 +468,7 @@ public enum RuleType {
     LOGICAL_EXCEPT_TO_PHYSICAL_EXCEPT(RuleTypeClass.IMPLEMENTATION),
     LOGICAL_INTERSECT_TO_PHYSICAL_INTERSECT(RuleTypeClass.IMPLEMENTATION),
     LOGICAL_GENERATE_TO_PHYSICAL_GENERATE(RuleTypeClass.IMPLEMENTATION),
+    LOGICAL_SEQUENCE_TO_PHYSICAL_SEQUENCE(RuleTypeClass.IMPLEMENTATION),
     LOGICAL_WINDOW_TO_PHYSICAL_WINDOW_RULE(RuleTypeClass.IMPLEMENTATION),
     IMPLEMENTATION_SENTINEL(RuleTypeClass.IMPLEMENTATION),
 

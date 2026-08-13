@@ -20,6 +20,7 @@
 
 #pragma once
 
+#include <gen_cpp/FrontendService_types.h>
 #include <gen_cpp/PaloInternalService_types.h>
 #include <gen_cpp/Types_types.h>
 #include <gen_cpp/segment_v2.pb.h>
@@ -501,6 +502,16 @@ public:
         _iceberg_commit_datas.emplace_back(iceberg_commit_data);
     }
 
+    std::vector<TSequenceUsage> sequence_usages() const {
+        std::lock_guard<std::mutex> lock(_sequence_usages_mutex);
+        return _sequence_usages;
+    }
+
+    void add_sequence_usage(const TSequenceUsage& usage) {
+        std::lock_guard<std::mutex> lock(_sequence_usages_mutex);
+        _sequence_usages.emplace_back(usage);
+    }
+
     // local runtime filter mgr, the runtime filter do not have remote target or
     // not need local merge should regist here. the instance exec finish, the local
     // runtime filter mgr can release the memory of local runtime filter
@@ -828,6 +839,8 @@ private:
 
     mutable std::mutex _iceberg_commit_datas_mutex;
     std::vector<TIcebergCommitData> _iceberg_commit_datas;
+    mutable std::mutex _sequence_usages_mutex;
+    std::vector<TSequenceUsage> _sequence_usages;
 
     std::vector<std::unique_ptr<doris::pipeline::PipelineXLocalStateBase>> _op_id_to_local_state;
 

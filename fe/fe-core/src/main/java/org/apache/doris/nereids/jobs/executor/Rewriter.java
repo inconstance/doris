@@ -35,6 +35,7 @@ import org.apache.doris.nereids.rules.rewrite.AdjustConjunctsReturnType;
 import org.apache.doris.nereids.rules.rewrite.AdjustNullable;
 import org.apache.doris.nereids.rules.rewrite.AdjustPreAggStatus;
 import org.apache.doris.nereids.rules.rewrite.AggScalarSubQueryToWindowFunction;
+import org.apache.doris.nereids.rules.rewrite.BindSequenceValue;
 import org.apache.doris.nereids.rules.rewrite.BuildAggForUnion;
 import org.apache.doris.nereids.rules.rewrite.CTEInline;
 import org.apache.doris.nereids.rules.rewrite.CheckAndStandardizeWindowFunctionAndFrame;
@@ -42,6 +43,7 @@ import org.apache.doris.nereids.rules.rewrite.CheckDataTypes;
 import org.apache.doris.nereids.rules.rewrite.CheckMatchExpression;
 import org.apache.doris.nereids.rules.rewrite.CheckMultiDistinct;
 import org.apache.doris.nereids.rules.rewrite.CheckPrivileges;
+import org.apache.doris.nereids.rules.rewrite.CheckSequenceUsage;
 import org.apache.doris.nereids.rules.rewrite.ClearContextStatus;
 import org.apache.doris.nereids.rules.rewrite.CollectCteConsumerOutput;
 import org.apache.doris.nereids.rules.rewrite.CollectFilterAboveConsumer;
@@ -237,6 +239,10 @@ public class Rewriter extends AbstractBatchJobExecutor {
                         new CountLiteralRewrite(),
                         new NormalizeSort()
                 ),
+                // Sequence values belong to the final rows of each query block. Bind them only
+                // after aggregate/subquery/sort normalization has established that row shape.
+                topDown(new BindSequenceValue()),
+                custom(RuleType.CHECK_SEQUENCE_USAGE, CheckSequenceUsage::new),
                 topic("Window analysis",
                         topDown(
                                 new ExtractAndNormalizeWindowExpression(),

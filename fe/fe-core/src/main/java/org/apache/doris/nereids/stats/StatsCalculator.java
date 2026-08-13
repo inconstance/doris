@@ -90,6 +90,7 @@ import org.apache.doris.nereids.trees.plans.logical.LogicalPlan;
 import org.apache.doris.nereids.trees.plans.logical.LogicalProject;
 import org.apache.doris.nereids.trees.plans.logical.LogicalRepeat;
 import org.apache.doris.nereids.trees.plans.logical.LogicalSchemaScan;
+import org.apache.doris.nereids.trees.plans.logical.LogicalSequence;
 import org.apache.doris.nereids.trees.plans.logical.LogicalSink;
 import org.apache.doris.nereids.trees.plans.logical.LogicalSort;
 import org.apache.doris.nereids.trees.plans.logical.LogicalTVFRelation;
@@ -123,6 +124,7 @@ import org.apache.doris.nereids.trees.plans.physical.PhysicalProject;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalQuickSort;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalRepeat;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalSchemaScan;
+import org.apache.doris.nereids.trees.plans.physical.PhysicalSequence;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalSink;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalStorageLayerAggregate;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalTVFRelation;
@@ -420,6 +422,11 @@ public class StatsCalculator extends DefaultPlanVisitor<Statistics, Void> {
     }
 
     @Override
+    public Statistics visitLogicalSequence(LogicalSequence<? extends Plan> sequence, Void context) {
+        return computeSequence(sequence.getSequenceAliases());
+    }
+
+    @Override
     public Statistics visitLogicalFilter(LogicalFilter<? extends Plan> filter, Void context) {
         return computeFilter(filter);
     }
@@ -571,6 +578,20 @@ public class StatsCalculator extends DefaultPlanVisitor<Statistics, Void> {
     @Override
     public Statistics visitPhysicalRepeat(PhysicalRepeat<? extends Plan> repeat, Void context) {
         return computeRepeat(repeat);
+    }
+
+    @Override
+    public Statistics visitPhysicalSequence(PhysicalSequence<? extends Plan> sequence, Void context) {
+        return computeSequence(sequence.getSequenceAliases());
+    }
+
+    private Statistics computeSequence(List<Alias> aliases) {
+        StatisticsBuilder builder = new StatisticsBuilder(groupExpression.childStatistics(0));
+        for (Alias alias : aliases) {
+            Slot slot = alias.toSlot();
+            builder.putColumnStatistics(slot, ColumnStatistic.createUnknownByDataType(slot.getDataType()));
+        }
+        return builder.build();
     }
 
     @Override

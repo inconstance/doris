@@ -384,6 +384,12 @@ public class OperationType {
 
     public static final short OP_ALTER_ROLE = 475;
 
+    // database-level Sequence 480 ~ 483
+    public static final short OP_CREATE_SEQUENCE = 480;
+    public static final short OP_ALTER_SEQUENCE = 481;
+    public static final short OP_DROP_SEQUENCE = 482;
+    public static final short OP_UPDATE_SEQUENCE_STATE = 483;
+
     /**
      * Get opcode name by op code.
      **/
