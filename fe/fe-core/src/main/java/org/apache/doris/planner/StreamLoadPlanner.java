@@ -19,12 +19,14 @@ package org.apache.doris.planner;
 
 import org.apache.doris.analysis.Analyzer;
 import org.apache.doris.analysis.BrokerDesc;
+import org.apache.doris.analysis.CastExpr;
 import org.apache.doris.analysis.DataDescription;
 import org.apache.doris.analysis.DescriptorTable;
 import org.apache.doris.analysis.Expr;
 import org.apache.doris.analysis.ImportColumnDesc;
 import org.apache.doris.analysis.PartitionNames;
 import org.apache.doris.analysis.SlotDescriptor;
+import org.apache.doris.analysis.SlotRef;
 import org.apache.doris.analysis.TupleDescriptor;
 import org.apache.doris.catalog.AggregateType;
 import org.apache.doris.catalog.Column;
@@ -36,6 +38,8 @@ import org.apache.doris.catalog.Partition;
 import org.apache.doris.catalog.PartitionInfo;
 import org.apache.doris.catalog.PartitionItem;
 import org.apache.doris.catalog.PartitionType;
+import org.apache.doris.catalog.Sequence;
+import org.apache.doris.catalog.Type;
 import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.Config;
 import org.apache.doris.common.DdlException;
@@ -62,6 +66,7 @@ import org.apache.doris.thrift.TQueryOptions;
 import org.apache.doris.thrift.TQueryType;
 import org.apache.doris.thrift.TScanRangeLocations;
 import org.apache.doris.thrift.TScanRangeParams;
+import org.apache.doris.thrift.TSequenceSpec;
 import org.apache.doris.thrift.TUniqueId;
 
 import com.google.common.collect.Lists;
@@ -90,6 +95,7 @@ public class StreamLoadPlanner {
     private DescriptorTable descTable;
 
     private ScanNode scanNode;
+    private PlanNode planRoot;
     private TupleDescriptor tupleDesc;
 
     public StreamLoadPlanner(Database db, OlapTable destTable, LoadTaskInfo taskInfo) {
@@ -244,6 +250,7 @@ public class StreamLoadPlanner {
         }
         // create scan node
         FileLoadScanNode fileScanNode = new FileLoadScanNode(new PlanNodeId(0), scanTupleDesc);
+        fileScanNode.enableSequenceDefaults();
         // 1. create file group
         DataDescription dataDescription = new DataDescription(destTable.getName(), taskInfo);
         dataDescription.analyzeWithoutCheckPriv(db.getFullName());
@@ -269,6 +276,7 @@ public class StreamLoadPlanner {
 
         scanNode.init(analyzer);
         scanNode.finalize(analyzer);
+        planRoot = addSequenceDefaults(fileScanNode, scanTupleDesc);
         descTable.computeStatAndMemLayout();
 
         int timeout = taskInfo.getTimeout();
@@ -294,7 +302,7 @@ public class StreamLoadPlanner {
 
         // for stream load, we only need one fragment, ScanNode -> DataSink.
         // OlapTableSink can dispatch data to corresponding node.
-        PlanFragment fragment = new PlanFragment(new PlanFragmentId(0), scanNode, DataPartition.UNPARTITIONED);
+        PlanFragment fragment = new PlanFragment(new PlanFragmentId(0), planRoot, DataPartition.UNPARTITIONED);
         fragment.setSink(olapTableSink);
 
         fragment.finalize(null);
@@ -489,6 +497,7 @@ public class StreamLoadPlanner {
         }
         // create scan node
         FileLoadScanNode fileScanNode = new FileLoadScanNode(new PlanNodeId(0), scanTupleDesc);
+        fileScanNode.enableSequenceDefaults();
         // 1. create file group
         DataDescription dataDescription = new DataDescription(destTable.getName(), taskInfo);
         dataDescription.analyzeWithoutCheckPriv(db.getFullName());
@@ -514,6 +523,7 @@ public class StreamLoadPlanner {
 
         scanNode.init(analyzer);
         scanNode.finalize(analyzer);
+        planRoot = addSequenceDefaults(fileScanNode, scanTupleDesc);
         descTable.computeStatAndMemLayout();
 
         int timeout = taskInfo.getTimeout();
@@ -545,7 +555,7 @@ public class StreamLoadPlanner {
 
         // for stream load, we only need one fragment, ScanNode -> DataSink.
         // OlapTableSink can dispatch data to corresponding node.
-        PlanFragment fragment = new PlanFragment(new PlanFragmentId(0), scanNode, DataPartition.UNPARTITIONED);
+        PlanFragment fragment = new PlanFragment(new PlanFragmentId(0), planRoot, DataPartition.UNPARTITIONED);
         fragment.setSink(olapTableSink);
 
         fragment.finalize(null);
@@ -608,6 +618,57 @@ public class StreamLoadPlanner {
         pipParams.setQueryGlobals(queryGlobals);
         pipParams.setTableName(destTable.getName());
         return pipParams;
+    }
+
+    private PlanNode addSequenceDefaults(FileLoadScanNode fileScanNode, TupleDescriptor scanTupleDesc)
+            throws UserException {
+        if (fileScanNode.getSequenceDefaultSlots().isEmpty()) {
+            return fileScanNode;
+        }
+
+        TupleDescriptor sequenceTupleDesc = descTable.createTupleDescriptor("SequenceDefaultTuple");
+        Map<String, SlotDescriptor> sequenceSlots = Maps.newHashMap();
+        List<TSequenceSpec> specs = Lists.newArrayList();
+        for (SlotDescriptor defaultSlot : fileScanNode.getSequenceDefaultSlots()) {
+            Column column = defaultSlot.getColumn();
+            if (sequenceSlots.containsKey(column.getName())) {
+                continue;
+            }
+            List<String> nameParts = column.getDefaultSequenceNameParts();
+            String sequenceDbName = nameParts.size() == 2 ? nameParts.get(0) : db.getFullName();
+            String sequenceName = nameParts.get(nameParts.size() - 1);
+            Database sequenceDb = Env.getCurrentInternalCatalog().getDbNullable(sequenceDbName);
+            Sequence sequence = sequenceDb == null ? null : sequenceDb.getSequenceNullable(sequenceName);
+            if (sequence == null) {
+                throw new AnalysisException("Sequence does not exist: " + String.join(".", nameParts));
+            }
+
+            SlotDescriptor sequenceSlot = descTable.addSlotDescriptor(sequenceTupleDesc);
+            sequenceSlot.setType(Type.LARGEINT);
+            sequenceSlot.setLabel("__sequence_default_" + defaultSlot.getId().asInt());
+            sequenceSlot.setIsMaterialized(true);
+            sequenceSlot.setIsNullable(false);
+            sequenceSlots.put(column.getName(), sequenceSlot);
+            specs.add(new TSequenceSpec(sequenceDb.getId(), sequence.getId(), sequence.getVersion(),
+                    sequenceSlot.getId().asInt(), true, sequence.getCacheSize()));
+        }
+
+        SequenceNode sequenceNode = new SequenceNode(
+                new PlanNodeId(1), fileScanNode, sequenceTupleDesc.getId(), specs);
+        List<Expr> projections = Lists.newArrayListWithCapacity(tupleDesc.getSlots().size());
+        for (SlotDescriptor outputSlot : tupleDesc.getSlots()) {
+            SlotDescriptor sequenceSlot = sequenceSlots.get(outputSlot.getColumn().getName());
+            if (sequenceSlot != null) {
+                projections.add(new CastExpr(outputSlot.getType(), new SlotRef(sequenceSlot)));
+            } else {
+                SlotDescriptor inputSlot = scanTupleDesc.getColumnSlot(outputSlot.getColumn().getName());
+                projections.add(new SlotRef(inputSlot));
+            }
+        }
+        sequenceNode.setProjectList(projections);
+        sequenceNode.setOutputTupleDesc(tupleDesc);
+        sequenceNode.init(analyzer);
+        return sequenceNode;
     }
 
     // get all specified partition ids.

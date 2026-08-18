@@ -637,12 +637,21 @@ public class Database extends MetaObject implements Writable, DatabaseIf<Table> 
     public boolean replaceSequence(Sequence expected, Sequence replacement) {
         Preconditions.checkState(isWriteLockHeldByCurrentThread());
         Preconditions.checkArgument(expected.getId() == replacement.getId());
-        String name = normalizeSequenceName(expected.getName());
-        if (!nameToSequence.replace(name, expected, replacement)) {
+        String oldName = normalizeSequenceName(expected.getName());
+        String newName = normalizeSequenceName(replacement.getName());
+        if (!oldName.equals(newName) && nameToSequence.containsKey(newName)) {
+            return false;
+        }
+        if (!nameToSequence.remove(oldName, expected)) {
+            return false;
+        }
+        if (nameToSequence.putIfAbsent(newName, replacement) != null) {
+            nameToSequence.put(oldName, expected);
             return false;
         }
         if (!idToSequence.replace(expected.getId(), expected, replacement)) {
-            nameToSequence.replace(name, replacement, expected);
+            nameToSequence.remove(newName, replacement);
+            nameToSequence.put(oldName, expected);
             return false;
         }
         return true;

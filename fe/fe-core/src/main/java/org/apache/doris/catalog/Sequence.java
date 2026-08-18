@@ -65,8 +65,6 @@ public class Sequence implements GsonPostProcessable {
     private boolean exhausted;
     @SerializedName("version")
     private long version;
-    @SerializedName("cycleEpoch")
-    private long cycleEpoch;
 
     private Sequence() {
     }
@@ -204,8 +202,25 @@ public class Sequence implements GsonPostProcessable {
         altered.nextValue = newNext.toString();
         altered.exhausted = restart ? false : exhausted;
         altered.version = Math.addExact(version, 1);
-        altered.cycleEpoch = Math.addExact(cycleEpoch, 1);
         return altered;
+    }
+
+    /** Builds the next metadata version while preserving allocation state across a rename. */
+    public synchronized Sequence renamedCopy(String newName) {
+        Sequence renamed = new Sequence();
+        renamed.id = id;
+        renamed.dbId = dbId;
+        renamed.name = newName;
+        renamed.startValue = startValue;
+        renamed.increment = increment;
+        renamed.minValue = minValue;
+        renamed.maxValue = maxValue;
+        renamed.cacheSize = cacheSize;
+        renamed.cycle = cycle;
+        renamed.nextValue = nextValue;
+        renamed.exhausted = exhausted;
+        renamed.version = Math.addExact(version, 1);
+        return renamed;
     }
 
     synchronized PendingAllocation prepareAllocation(long count, long expectedVersion) throws UserException {
@@ -218,7 +233,6 @@ public class Sequence implements GsonPostProcessable {
         BigInteger min = getMinValue();
         BigInteger max = getMaxValue();
         BigInteger current = getNextValue();
-        long epoch = cycleEpoch;
         long remaining = count;
         List<RangeSegment> segments = new ArrayList<>();
 
@@ -226,7 +240,7 @@ public class Sequence implements GsonPostProcessable {
             long available = valuesUntilBoundary(current, step, min, max).min(BigInteger.valueOf(Long.MAX_VALUE))
                     .longValueExact();
             long segmentCount = Math.min(remaining, available);
-            segments.add(new RangeSegment(current, step, segmentCount, epoch));
+            segments.add(new RangeSegment(current, step, segmentCount));
             remaining -= segmentCount;
             BigInteger candidate = current.add(step.multiply(BigInteger.valueOf(segmentCount)));
             boolean beyond = step.signum() > 0 ? candidate.compareTo(max) > 0 : candidate.compareTo(min) < 0;
@@ -239,13 +253,12 @@ public class Sequence implements GsonPostProcessable {
                     throw new UserException("Sequence " + name + " has insufficient values for allocation");
                 }
                 return new PendingAllocation(this, segments,
-                        new AllocationState(current.toString(), true, epoch), version);
+                        new AllocationState(current.toString(), true), version);
             }
             current = step.signum() > 0 ? min : max;
-            epoch = Math.addExact(epoch, 1);
         }
         return new PendingAllocation(this, segments,
-                new AllocationState(current.toString(), false, epoch), version);
+                new AllocationState(current.toString(), false), version);
     }
 
     private static BigInteger valuesUntilBoundary(BigInteger current, BigInteger step,
@@ -259,7 +272,6 @@ public class Sequence implements GsonPostProcessable {
         Preconditions.checkState(allocation.expectedVersion == version, "Sequence changed before allocation commit");
         nextValue = allocation.newState.nextValue;
         exhausted = allocation.newState.exhausted;
-        cycleEpoch = allocation.newState.cycleEpoch;
     }
 
     /** Applies a state advance while replaying the edit log. */
@@ -269,7 +281,6 @@ public class Sequence implements GsonPostProcessable {
         }
         nextValue = state.nextValue;
         exhausted = state.exhausted;
-        cycleEpoch = state.cycleEpoch;
     }
 
     public long getId() {
@@ -320,10 +331,6 @@ public class Sequence implements GsonPostProcessable {
         return version;
     }
 
-    public long getCycleEpoch() {
-        return cycleEpoch;
-    }
-
     public String toCreateSql(String dbName) {
         StringBuilder sql = new StringBuilder("CREATE SEQUENCE `")
                 .append(dbName.replace("`", "``"))
@@ -342,13 +349,11 @@ public class Sequence implements GsonPostProcessable {
         private final BigInteger startValue;
         private final BigInteger increment;
         private final long count;
-        private final long cycleEpoch;
 
-        public RangeSegment(BigInteger startValue, BigInteger increment, long count, long cycleEpoch) {
+        public RangeSegment(BigInteger startValue, BigInteger increment, long count) {
             this.startValue = startValue;
             this.increment = increment;
             this.count = count;
-            this.cycleEpoch = cycleEpoch;
         }
 
         public BigInteger getStartValue() {
@@ -362,10 +367,6 @@ public class Sequence implements GsonPostProcessable {
         public long getCount() {
             return count;
         }
-
-        public long getCycleEpoch() {
-            return cycleEpoch;
-        }
     }
 
     public static class AllocationState {
@@ -373,16 +374,13 @@ public class Sequence implements GsonPostProcessable {
         private String nextValue;
         @SerializedName("exhausted")
         private boolean exhausted;
-        @SerializedName("cycleEpoch")
-        private long cycleEpoch;
 
         private AllocationState() {
         }
 
-        public AllocationState(String nextValue, boolean exhausted, long cycleEpoch) {
+        public AllocationState(String nextValue, boolean exhausted) {
             this.nextValue = nextValue;
             this.exhausted = exhausted;
-            this.cycleEpoch = cycleEpoch;
         }
 
         public String getNextValue() {
@@ -391,10 +389,6 @@ public class Sequence implements GsonPostProcessable {
 
         public boolean isExhausted() {
             return exhausted;
-        }
-
-        public long getCycleEpoch() {
-            return cycleEpoch;
         }
     }
 

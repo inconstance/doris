@@ -33,6 +33,7 @@ import org.apache.doris.nereids.analyzer.UnboundHiveTableSink;
 import org.apache.doris.nereids.analyzer.UnboundIcebergTableSink;
 import org.apache.doris.nereids.analyzer.UnboundJdbcTableSink;
 import org.apache.doris.nereids.analyzer.UnboundOneRowRelation;
+import org.apache.doris.nereids.analyzer.UnboundSequenceValue;
 import org.apache.doris.nereids.analyzer.UnboundTableSink;
 import org.apache.doris.nereids.exceptions.AnalysisException;
 import org.apache.doris.nereids.parser.LogicalPlanBuilder;
@@ -438,6 +439,9 @@ public class InsertUtils {
                 if (!column.isAllowNull()) {
                     throw new AnalysisException("Column has no default value, column=" + column.getName());
                 }
+            }
+            if (column.hasSequenceDefault()) {
+                return new UnboundAlias(new UnboundSequenceValue(column.getDefaultSequenceNameParts(), true));
             }
             if (column.getDefaultValueExpr() != null) {
                 Expression defualtValueExpression = new NereidsParser().parseExpression(

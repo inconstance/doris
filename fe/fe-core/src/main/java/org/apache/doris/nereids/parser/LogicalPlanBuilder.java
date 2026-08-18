@@ -2795,6 +2795,13 @@ public class LogicalPlanBuilder extends DorisParserBaseVisitor<Object> {
                 defaultValue = Optional.of(DefaultValue.CURRENT_DATE_DEFAULT_VALUE);
             } else if (ctx.BITMAP_EMPTY() != null) {
                 defaultValue = Optional.of(DefaultValue.BITMAP_EMPTY_DEFAULT_VALUE);
+            } else if (ctx.defaultSequenceName != null) {
+                List<String> sequenceNameParts = new ArrayList<>();
+                if (ctx.defaultSequenceDb != null) {
+                    sequenceNameParts.add(ctx.defaultSequenceDb.getText());
+                }
+                sequenceNameParts.add(ctx.defaultSequenceName.getText());
+                defaultValue = Optional.of(new DefaultValue(sequenceNameParts));
             }
         }
         if (ctx.UPDATE() != null) {
@@ -3746,6 +3753,7 @@ public class LogicalPlanBuilder extends DorisParserBaseVisitor<Object> {
         EnumMap<CreateSequenceCommand.Option, String> options = new EnumMap<>(CreateSequenceCommand.Option.class);
         boolean restart = false;
         BigInteger restartValue = null;
+        String newName = null;
         for (DorisParser.AlterSequenceClauseContext clause : ctx.alterSequenceClause()) {
             if (clause.RESTART() != null) {
                 if (restart) {
@@ -3753,11 +3761,19 @@ public class LogicalPlanBuilder extends DorisParserBaseVisitor<Object> {
                 }
                 restart = true;
                 restartValue = clause.restart == null ? null : new BigInteger(clause.restart.getText());
+            } else if (clause.RENAME() != null) {
+                if (newName != null) {
+                    throw new ParseException("Duplicate sequence option RENAME", clause);
+                }
+                newName = stripQuotes(clause.newName.getText());
             } else {
                 applySequenceOption(options, clause.sequenceOption(), false);
             }
         }
-        return new AlterSequenceCommand(visitMultipartIdentifier(ctx.name), options, restart, restartValue);
+        if (newName != null && (restart || !options.isEmpty() || ctx.alterSequenceClause().size() != 1)) {
+            throw new ParseException("RENAME cannot be combined with other ALTER SEQUENCE options", ctx);
+        }
+        return new AlterSequenceCommand(visitMultipartIdentifier(ctx.name), options, restart, restartValue, newName);
     }
 
     @Override

@@ -23,35 +23,38 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigInteger;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.OptionalLong;
+import java.util.concurrent.atomic.AtomicInteger;
 
 class ExternalSequenceAllocatorTest {
     @Test
-    void acceptsCycleSegmentsAndProviderAllocationId() throws Exception {
+    void assemblesTruncatedCycleResponses() throws Exception {
         Sequence sequence = new Sequence(10, 20, "seq", BigInteger.valueOf(8), BigInteger.ONE,
                 BigInteger.ONE, BigInteger.TEN, 5, true);
-        ExternalSequenceAllocator.setProvider(request -> new ExternalSequenceProvider.Allocation(Arrays.asList(
-                new ExternalSequenceProvider.Segment(BigInteger.valueOf(8), BigInteger.ONE, 3),
-                new ExternalSequenceProvider.Segment(BigInteger.ONE, BigInteger.ONE, 2)),
-                OptionalLong.of(101)));
+        AtomicInteger calls = new AtomicInteger();
+        ExternalSequenceAllocator.setProvider(request -> {
+            Assertions.assertEquals("db", request.getDbName());
+            Assertions.assertEquals("seq", request.getSequenceName());
+            if (calls.getAndIncrement() == 0) {
+                Assertions.assertEquals(5, request.getSize());
+                return new ExternalSequenceProvider.Response(BigInteger.valueOf(8), BigInteger.ONE, 3);
+            }
+            Assertions.assertEquals(2, request.getSize());
+            return new ExternalSequenceProvider.Response(BigInteger.ONE, BigInteger.ONE, 2);
+        });
 
         Sequence.AllocationResult result = ExternalSequenceAllocator.allocate("db", sequence, 5, 1);
         Assertions.assertEquals(2, result.getSegments().size());
-        Assertions.assertEquals(1, result.getSegments().get(1).getCycleEpoch());
-        Assertions.assertEquals(101, result.getAllocationTicket());
+        Assertions.assertEquals(2, calls.get());
         // The external provider is the cursor authority; FE does not advance or journal local allocation state.
         Assertions.assertEquals(BigInteger.valueOf(8), sequence.getNextValue());
     }
 
     @Test
-    void assignsArrivalTicketWhenAllocationIdIsAbsent() throws Exception {
+    void assignsArrivalTicketAfterCompleteAllocation() throws Exception {
         Sequence sequence = new Sequence(10, 20, "seq", BigInteger.ONE, BigInteger.ONE,
                 BigInteger.ONE, BigInteger.TEN, 2, false);
-        ExternalSequenceAllocator.setProvider(request -> new ExternalSequenceProvider.Allocation(
-                Collections.singletonList(new ExternalSequenceProvider.Segment(
-                        BigInteger.ONE, BigInteger.ONE, request.getCount())), OptionalLong.empty()));
+        ExternalSequenceAllocator.setProvider(request ->
+                new ExternalSequenceProvider.Response(BigInteger.ONE, BigInteger.ONE, request.getSize()));
 
         long first = ExternalSequenceAllocator.allocate("db", sequence, 1, 1).getAllocationTicket();
         long second = ExternalSequenceAllocator.allocate("db", sequence, 1, 1).getAllocationTicket();
@@ -59,21 +62,36 @@ class ExternalSequenceAllocatorTest {
     }
 
     @Test
-    void rejectsInvalidCycleAndCountResponses() throws Exception {
+    void rejectsTruncatedNoCycleResponse() throws Exception {
         Sequence noCycle = new Sequence(10, 20, "seq", BigInteger.valueOf(9), BigInteger.ONE,
                 BigInteger.ONE, BigInteger.TEN, 4, false);
-        ExternalSequenceAllocator.setProvider(request -> new ExternalSequenceProvider.Allocation(Arrays.asList(
-                new ExternalSequenceProvider.Segment(BigInteger.valueOf(9), BigInteger.ONE, 2),
-                new ExternalSequenceProvider.Segment(BigInteger.ONE, BigInteger.ONE, 2)), OptionalLong.empty()));
+        ExternalSequenceAllocator.setProvider(request ->
+                new ExternalSequenceProvider.Response(BigInteger.valueOf(9), BigInteger.ONE, 2));
         Assertions.assertThrows(UserException.class,
                 () -> ExternalSequenceAllocator.allocate("db", noCycle, 4, 1));
+    }
 
+    @Test
+    void rejectsResponseTruncatedBeforeBoundary() throws Exception {
         Sequence cycle = new Sequence(10, 20, "seq", BigInteger.valueOf(9), BigInteger.ONE,
                 BigInteger.ONE, BigInteger.TEN, 4, true);
-        ExternalSequenceAllocator.setProvider(request -> new ExternalSequenceProvider.Allocation(
-                Collections.singletonList(new ExternalSequenceProvider.Segment(
-                        BigInteger.valueOf(9), BigInteger.ONE, 2)), OptionalLong.empty()));
+        ExternalSequenceAllocator.setProvider(request ->
+                new ExternalSequenceProvider.Response(BigInteger.valueOf(7), BigInteger.ONE, 2));
         Assertions.assertThrows(UserException.class,
                 () -> ExternalSequenceAllocator.allocate("db", cycle, 4, 1));
+    }
+
+    @Test
+    void assemblesNegativeCycleResponses() throws Exception {
+        Sequence sequence = new Sequence(10, 20, "seq", BigInteger.valueOf(-9), BigInteger.ONE.negate(),
+                BigInteger.TEN.negate(), BigInteger.ONE.negate(), 4, true);
+        AtomicInteger calls = new AtomicInteger();
+        ExternalSequenceAllocator.setProvider(request -> calls.getAndIncrement() == 0
+                ? new ExternalSequenceProvider.Response(BigInteger.valueOf(-9), BigInteger.ONE.negate(), 2)
+                : new ExternalSequenceProvider.Response(BigInteger.ONE.negate(), BigInteger.ONE.negate(), 2));
+
+        Sequence.AllocationResult result = ExternalSequenceAllocator.allocate("db", sequence, 4, 1);
+        Assertions.assertEquals(2, result.getSegments().size());
+        Assertions.assertEquals(BigInteger.ONE.negate(), result.getSegments().get(1).getStartValue());
     }
 }

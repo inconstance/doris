@@ -20,92 +20,58 @@ package org.apache.doris.catalog;
 import org.apache.doris.common.UserException;
 
 import java.math.BigInteger;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.OptionalLong;
 
 /** Adapter point between FE sequence allocation and an external sequence service. */
 public interface ExternalSequenceProvider {
-    Allocation allocate(Request request) throws UserException;
+    Response allocate(Request request) throws UserException;
 
-    /** The gRPC adapter should construct this request without adding FE-internal version fields. */
+    /** Request shape exposed by the existing external service. */
     class Request {
-        private final long dbId;
         private final String dbName;
-        private final long sequenceId;
         private final String sequenceName;
-        private final long count;
+        private final long size;
 
-        public Request(long dbId, String dbName, long sequenceId, String sequenceName, long count) {
-            this.dbId = dbId;
+        public Request(String dbName, String sequenceName, long size) {
             this.dbName = dbName;
-            this.sequenceId = sequenceId;
             this.sequenceName = sequenceName;
-            this.count = count;
-        }
-
-        public long getDbId() {
-            return dbId;
+            this.size = size;
         }
 
         public String getDbName() {
             return dbName;
         }
 
-        public long getSequenceId() {
-            return sequenceId;
-        }
-
         public String getSequenceName() {
             return sequenceName;
         }
 
-        public long getCount() {
-            return count;
+        public long getSize() {
+            return size;
         }
     }
 
-    /** A segment never crosses a CYCLE boundary; a wrapped allocation therefore contains multiple segments. */
-    class Segment {
-        private final BigInteger startValue;
+    /** A response is truncated at the current MINVALUE/MAXVALUE boundary. */
+    class Response {
+        private final BigInteger start;
         private final BigInteger increment;
-        private final long count;
+        private final long size;
 
-        public Segment(BigInteger startValue, BigInteger increment, long count) {
-            this.startValue = startValue;
+        public Response(BigInteger start, BigInteger increment, long size) {
+            this.start = start;
             this.increment = increment;
-            this.count = count;
+            this.size = size;
         }
 
-        public BigInteger getStartValue() {
-            return startValue;
+        public BigInteger getStart() {
+            return start;
         }
 
         public BigInteger getIncrement() {
             return increment;
         }
 
-        public long getCount() {
-            return count;
-        }
-    }
-
-    class Allocation {
-        private final List<Segment> segments;
-        private final OptionalLong allocationId;
-
-        public Allocation(List<Segment> segments, OptionalLong allocationId) {
-            this.segments = Collections.unmodifiableList(new ArrayList<>(segments));
-            this.allocationId = allocationId;
-        }
-
-        public List<Segment> getSegments() {
-            return segments;
-        }
-
-        public OptionalLong getAllocationId() {
-            return allocationId;
+        public long getSize() {
+            return size;
         }
     }
 }

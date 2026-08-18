@@ -511,9 +511,20 @@ public class Column implements Writable, GsonPostProcessable {
         return this.defaultValue;
     }
 
+    public boolean hasSequenceDefault() {
+        return defaultValueExprDef != null && defaultValueExprDef.isSequenceNextVal();
+    }
+
+    public List<String> getDefaultSequenceNameParts() {
+        return hasSequenceDefault() ? defaultValueExprDef.getSequenceNameParts() : new ArrayList<>();
+    }
+
     public Expr getDefaultValueExpr() throws AnalysisException {
         if (defaultValue == null) {
             return null;
+        }
+        if (hasSequenceDefault()) {
+            throw new AnalysisException("Sequence NEXTVAL column default requires SequenceNode materialization");
         }
         StringLiteral defaultValueLiteral = new StringLiteral(defaultValue);
         if (getDataType() == PrimitiveType.VARCHAR) {
@@ -589,7 +600,9 @@ public class Column implements Writable, GsonPostProcessable {
         tColumn.setIsAllowNull(this.isAllowNull);
         tColumn.setIsAutoIncrement(this.isAutoInc);
         // keep compatibility
-        tColumn.setDefaultValue(this.realDefaultValue == null ? this.defaultValue : this.realDefaultValue);
+        if (!hasSequenceDefault()) {
+            tColumn.setDefaultValue(this.realDefaultValue == null ? this.defaultValue : this.realDefaultValue);
+        }
         tColumn.setVisible(visible);
         toChildrenThrift(this, tColumn);
 
@@ -818,7 +831,7 @@ public class Column implements Writable, GsonPostProcessable {
             sb.append(" AUTO_INCREMENT(").append(autoIncInitValue).append(")");
         }
         if (defaultValue != null && getDataType() != PrimitiveType.HLL && getDataType() != PrimitiveType.BITMAP) {
-            if (defaultValueExprDef != null) {
+            if (hasSequenceDefault() || defaultValueExprDef != null) {
                 sb.append(" DEFAULT ").append(defaultValue).append("");
             } else {
                 sb.append(" DEFAULT \"").append(defaultValue).append("\"");

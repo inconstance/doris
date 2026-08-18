@@ -54,7 +54,6 @@ class SequenceTest {
         Assertions.assertEquals(3, segments.get(0).getCount());
         Assertions.assertEquals(BigInteger.ONE, segments.get(1).getStartValue());
         Assertions.assertEquals(2, segments.get(1).getCount());
-        Assertions.assertEquals(1, segments.get(1).getCycleEpoch());
         Assertions.assertEquals(BigInteger.valueOf(3), sequence.getNextValue());
     }
 
@@ -115,6 +114,20 @@ class SequenceTest {
     }
 
     @Test
+    void sequenceColumnDefaultSurvivesJsonSnapshot() {
+        Column column = new Column("id", Type.BIGINT, true, null, false,
+                "db.seq.NEXTVAL", "", true,
+                new org.apache.doris.analysis.DefaultValueExprDef(java.util.Arrays.asList("db", "seq")),
+                Column.COLUMN_UNIQUE_ID_INIT_VALUE, "db.seq.NEXTVAL");
+
+        Column restored = GsonUtils.GSON.fromJson(GsonUtils.GSON.toJson(column), Column.class);
+        Assertions.assertTrue(restored.hasSequenceDefault());
+        Assertions.assertEquals(java.util.Arrays.asList("db", "seq"), restored.getDefaultSequenceNameParts());
+        Assertions.assertTrue(restored.toSql().contains("DEFAULT db.seq.NEXTVAL"));
+        Assertions.assertFalse(restored.toThrift().isSetDefaultValue());
+    }
+
+    @Test
     void persistenceFailureDoesNotAdvanceState() throws Exception {
         Sequence sequence = sequence(BigInteger.ONE, BigInteger.ONE, BigInteger.ONE, BigInteger.TEN, 2, false);
         Assertions.assertThrows(UserException.class, () -> sequence.allocate(2, 1,
@@ -133,7 +146,6 @@ class SequenceTest {
 
         Sequence restarted = sequence.alteredCopy(null, null, null, null, null, true, BigInteger.valueOf(5));
         Assertions.assertEquals(2, restarted.getVersion());
-        Assertions.assertEquals(1, restarted.getCycleEpoch());
         Assertions.assertEquals(BigInteger.valueOf(5), restarted.getNextValue());
         Assertions.assertFalse(restarted.isExhausted());
         Assertions.assertThrows(UserException.class, () -> restarted.allocate(1, 1,
@@ -147,6 +159,31 @@ class SequenceTest {
         sequence.allocate(2, 1, (id, version, state) -> 1);
         Sequence restarted = sequence.alteredCopy(null, null, null, null, null, true, null);
         Assertions.assertEquals(BigInteger.valueOf(7), restarted.getNextValue());
+    }
+
+    @Test
+    void renamePreservesIdentityAndAllocationState() throws Exception {
+        Sequence sequence = sequence(BigInteger.ONE, BigInteger.ONE, BigInteger.ONE,
+                BigInteger.TEN, 3, true);
+        sequence.allocate(2, 1, (id, version, state) -> 1);
+
+        Sequence renamed = sequence.renamedCopy("seq2");
+        Assertions.assertEquals(sequence.getId(), renamed.getId());
+        Assertions.assertEquals("seq2", renamed.getName());
+        Assertions.assertEquals(BigInteger.valueOf(3), renamed.getNextValue());
+        Assertions.assertEquals(2, renamed.getVersion());
+
+        Database db = new Database(20, "db");
+        db.writeLock();
+        try {
+            Assertions.assertTrue(db.registerSequence(sequence));
+            Assertions.assertTrue(db.replaceSequence(sequence, renamed));
+            Assertions.assertNull(db.getSequenceNullable("seq"));
+            Assertions.assertSame(renamed, db.getSequenceNullable("seq2"));
+            Assertions.assertSame(renamed, db.getSequenceNullable(sequence.getId()));
+        } finally {
+            db.writeUnlock();
+        }
     }
 
     @Test

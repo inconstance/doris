@@ -28,6 +28,7 @@ import org.apache.doris.persist.gson.GsonPostProcessable;
 import org.apache.doris.persist.gson.GsonUtils;
 import org.apache.doris.qe.ConnectContext;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import com.google.gson.annotations.SerializedName;
 import org.apache.log4j.LogManager;
@@ -47,7 +48,8 @@ public class DefaultValueExprDef implements Writable, GsonPostProcessable {
     private String exprName;
     @SerializedName("precision")
     private Long precision;
-
+    @SerializedName("sequenceNameParts")
+    private List<String> sequenceNameParts;
 
     public DefaultValueExprDef(String exprName) {
         this.exprName = exprName;
@@ -58,11 +60,19 @@ public class DefaultValueExprDef implements Writable, GsonPostProcessable {
         this.precision = precision;
     }
 
+    public DefaultValueExprDef(List<String> sequenceNameParts) {
+        this.exprName = "sequence_nextval";
+        this.sequenceNameParts = ImmutableList.copyOf(sequenceNameParts);
+    }
+
     /**
      * generate a FunctionCallExpr
      * @return FunctionCallExpr of exprName
      */
     public FunctionCallExpr getExpr(Type type) {
+        if (isSequenceNextVal()) {
+            throw new IllegalStateException("Sequence NEXTVAL default must be materialized by SequenceNode");
+        }
         List<Expr> exprs = null;
         if (precision != null && precision != 0) {
             exprs = Lists.newArrayList();
@@ -86,6 +96,14 @@ public class DefaultValueExprDef implements Writable, GsonPostProcessable {
 
     public Long getPrecision() {
         return precision;
+    }
+
+    public boolean isSequenceNextVal() {
+        return sequenceNameParts != null && !sequenceNameParts.isEmpty();
+    }
+
+    public List<String> getSequenceNameParts() {
+        return sequenceNameParts == null ? ImmutableList.of() : ImmutableList.copyOf(sequenceNameParts);
     }
 
     @Override

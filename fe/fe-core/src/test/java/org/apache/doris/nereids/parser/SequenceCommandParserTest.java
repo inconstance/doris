@@ -21,6 +21,7 @@ import org.apache.doris.nereids.analyzer.UnboundSequenceValue;
 import org.apache.doris.nereids.exceptions.ParseException;
 import org.apache.doris.nereids.trees.plans.commands.AlterSequenceCommand;
 import org.apache.doris.nereids.trees.plans.commands.CreateSequenceCommand;
+import org.apache.doris.nereids.trees.plans.commands.CreateTableCommand;
 import org.apache.doris.nereids.trees.plans.commands.DropSequenceCommand;
 import org.apache.doris.nereids.trees.plans.commands.ShowCreateSequenceCommand;
 
@@ -39,6 +40,8 @@ class SequenceCommandParserTest {
                 parser.parseSingle("ALTER SEQUENCE db.seq RESTART WITH 42 NOCACHE NOCYCLE"));
         Assertions.assertInstanceOf(AlterSequenceCommand.class,
                 parser.parseSingle("ALTER SEQUENCE seq RESTART"));
+        Assertions.assertInstanceOf(AlterSequenceCommand.class,
+                parser.parseSingle("ALTER SEQUENCE db.seq RENAME TO seq2"));
         Assertions.assertInstanceOf(DropSequenceCommand.class,
                 parser.parseSingle("DROP SEQUENCE IF EXISTS db.seq"));
         Assertions.assertInstanceOf(ShowCreateSequenceCommand.class,
@@ -47,6 +50,8 @@ class SequenceCommandParserTest {
 
     @Test
     void rejectsConflictingAndInvalidAlterOptions() {
+        Assertions.assertThrows(ParseException.class,
+                () -> parser.parseSingle("ALTER SEQUENCE seq RENAME TO seq2 CACHE 10"));
         Assertions.assertThrows(ParseException.class,
                 () -> parser.parseSingle("CREATE SEQUENCE seq CACHE 2 NOCACHE"));
         Assertions.assertThrows(ParseException.class,
@@ -68,5 +73,15 @@ class SequenceCommandParserTest {
         Assertions.assertFalse(currVal.isNextVal());
         Assertions.assertThrows(ParseException.class,
                 () -> parser.parseExpression("catalog.db.seq.NEXTVAL"));
+    }
+
+    @Test
+    void parsesSequenceNextValColumnDefault() {
+        Assertions.assertInstanceOf(CreateTableCommand.class, parser.parseSingle(
+                "CREATE TABLE t (id BIGINT DEFAULT seq.NEXTVAL, v INT) "
+                        + "DUPLICATE KEY(id) DISTRIBUTED BY HASH(id) BUCKETS 1"));
+        Assertions.assertInstanceOf(CreateTableCommand.class, parser.parseSingle(
+                "CREATE TABLE t (id LARGEINT DEFAULT db.seq.NEXTVAL) "
+                        + "DUPLICATE KEY(id) DISTRIBUTED BY HASH(id) BUCKETS 1"));
     }
 }

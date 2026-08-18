@@ -65,6 +65,9 @@ import java.util.Map;
 public class FileLoadScanNode extends FileScanNode {
     private static final Logger LOG = LogManager.getLogger(FileLoadScanNode.class);
 
+    private final List<SlotDescriptor> sequenceDefaultSlots = Lists.newArrayList();
+    private boolean enableSequenceDefaults;
+
     public static class ParamCreateContext {
         public BrokerFileGroup fileGroup;
         public TupleDescriptor destTupleDescriptor;
@@ -252,7 +255,12 @@ public class FileLoadScanNode extends FileScanNode {
                 } else {
                     Column column = destSlotDesc.getColumn();
                     if (column.getDefaultValue() != null) {
-                        if (column.getDefaultValueExprDef() != null) {
+                        if (column.hasSequenceDefault() && enableSequenceDefaults) {
+                            // SequenceNode replaces this placeholder after the file scan.
+                            expr = NullLiteral.create(column.getType());
+                            destSlotDesc.setIsNullable(true);
+                            sequenceDefaultSlots.add(destSlotDesc);
+                        } else if (column.getDefaultValueExprDef() != null) {
                             expr = column.getDefaultValueExpr();
                             expr.analyze(analyzer);
                         } else {
@@ -329,6 +337,14 @@ public class FileLoadScanNode extends FileScanNode {
         for (Expr conjunct : preFilterConjuncts) {
             params.addToPreFilterExprsList(conjunct.treeToThrift());
         }
+    }
+
+    public List<SlotDescriptor> getSequenceDefaultSlots() {
+        return sequenceDefaultSlots;
+    }
+
+    public void enableSequenceDefaults() {
+        enableSequenceDefaults = true;
     }
 
     protected void checkBitmapCompatibility(Analyzer analyzer, SlotDescriptor slotDesc, Expr expr)

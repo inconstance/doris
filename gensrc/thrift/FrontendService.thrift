@@ -1505,7 +1505,6 @@ struct TSequenceRangeSegment {
     1: required string start_value
     2: required string increment
     3: required i64 count
-    4: required i64 cycle_epoch
 }
 
 struct TSequenceRangeResult {

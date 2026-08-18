@@ -22,14 +22,12 @@ import org.apache.doris.common.UserException;
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.OptionalLong;
 
 /** Validates external allocations and converts them to the existing FE-to-BE allocation model. */
 public final class ExternalSequenceAllocator {
     private static final Object TICKET_LOCK = new Object();
     private static volatile ExternalSequenceProvider provider;
     private static long arrivalTicket;
-    private static Boolean providerUsesAllocationId;
 
     private ExternalSequenceAllocator() {
     }
@@ -38,44 +36,25 @@ public final class ExternalSequenceAllocator {
         synchronized (TICKET_LOCK) {
             provider = externalProvider;
             arrivalTicket = 0;
-            providerUsesAllocationId = null;
         }
     }
 
     public static Sequence.AllocationResult allocate(String dbName, Sequence sequence,
             long count, long expectedVersion) throws UserException {
-        sequence.validateAllocationRequest(count, expectedVersion);
         ExternalSequenceProvider currentProvider = provider;
         if (currentProvider == null) {
             throw new UserException("External sequence provider is not initialized");
         }
-
-        ExternalSequenceProvider.Request request = new ExternalSequenceProvider.Request(
-                sequence.getDbId(), dbName, sequence.getId(), sequence.getName(), count);
-        ExternalSequenceProvider.Allocation allocation = currentProvider.allocate(request);
-        if (allocation == null) {
-            throw new UserException("External sequence provider returned a null allocation");
+        synchronized (sequence) {
+            sequence.validateAllocationRequest(count, expectedVersion);
+            List<Sequence.RangeSegment> segments = allocateSegments(
+                    currentProvider, dbName, sequence, count);
+            return new Sequence.AllocationResult(segments, sequence.getVersion(), nextArrivalTicket());
         }
-        List<Sequence.RangeSegment> segments = validateSegments(sequence, allocation.getSegments(), count);
-        OptionalLong allocationId = allocation.getAllocationId();
-        long ticket = allocationTicket(allocationId);
-        return new Sequence.AllocationResult(segments, sequence.getVersion(), ticket);
     }
 
-    private static long allocationTicket(OptionalLong allocationId) throws UserException {
-        if (allocationId.isPresent() && allocationId.getAsLong() < 0) {
-            throw new UserException("External sequence allocationId must not be negative");
-        }
+    private static long nextArrivalTicket() throws UserException {
         synchronized (TICKET_LOCK) {
-            boolean usesAllocationId = allocationId.isPresent();
-            if (providerUsesAllocationId != null && providerUsesAllocationId != usesAllocationId) {
-                throw new UserException("External sequence provider must consistently return allocationId or omit it");
-            }
-            providerUsesAllocationId = usesAllocationId;
-            if (usesAllocationId) {
-                return allocationId.getAsLong();
-            }
-            // Without a provider allocationId, successful responses are ordered by their arrival at this FE.
             if (arrivalTicket == Long.MAX_VALUE) {
                 throw new UserException("External sequence arrival ticket overflow");
             }
@@ -83,61 +62,52 @@ public final class ExternalSequenceAllocator {
         }
     }
 
-    private static List<Sequence.RangeSegment> validateSegments(Sequence sequence,
-            List<ExternalSequenceProvider.Segment> externalSegments, long requestedCount) throws UserException {
-        if (externalSegments == null || externalSegments.isEmpty()) {
-            throw new UserException("External sequence provider returned no segments");
-        }
+    private static List<Sequence.RangeSegment> allocateSegments(ExternalSequenceProvider currentProvider,
+            String dbName, Sequence sequence, long requestedCount) throws UserException {
         BigInteger increment = sequence.getIncrement();
         BigInteger min = sequence.getMinValue();
         BigInteger max = sequence.getMaxValue();
         BigInteger expectedStart = null;
-        long total = 0;
-        long epoch = sequence.getCycleEpoch();
-        List<Sequence.RangeSegment> result = new ArrayList<>(externalSegments.size());
+        long remaining = requestedCount;
+        List<Sequence.RangeSegment> result = new ArrayList<>(2);
 
-        for (ExternalSequenceProvider.Segment segment : externalSegments) {
-            if (segment == null || segment.getStartValue() == null || segment.getIncrement() == null) {
-                throw new UserException("External sequence provider returned an incomplete segment");
+        while (remaining > 0) {
+            ExternalSequenceProvider.Response response = currentProvider.allocate(
+                    new ExternalSequenceProvider.Request(dbName, sequence.getName(), remaining));
+            if (response == null || response.getStart() == null || response.getIncrement() == null) {
+                throw new UserException("External sequence provider returned an incomplete response");
             }
-            if (!increment.equals(segment.getIncrement())) {
-                throw new UserException("External sequence segment increment does not match sequence metadata");
+            if (!increment.equals(response.getIncrement())) {
+                throw new UserException("External sequence response increment does not match sequence metadata");
             }
-            if (segment.getCount() <= 0) {
-                throw new UserException("External sequence segment count must be positive");
-            }
-            try {
-                total = Math.addExact(total, segment.getCount());
-            } catch (ArithmeticException e) {
-                throw new UserException("External sequence allocation count overflow");
+            if (response.getSize() <= 0 || response.getSize() > remaining) {
+                throw new UserException("External sequence response size must be between 1 and " + remaining);
             }
 
-            BigInteger start = segment.getStartValue();
-            BigInteger last = start.add(increment.multiply(BigInteger.valueOf(segment.getCount() - 1)));
+            BigInteger start = response.getStart();
+            BigInteger last = start.add(increment.multiply(BigInteger.valueOf(response.getSize() - 1)));
             checkInBounds(start, min, max);
             checkInBounds(last, min, max);
 
-            if (expectedStart != null) {
-                boolean crossedBoundary = increment.signum() > 0
-                        ? expectedStart.compareTo(max) > 0 : expectedStart.compareTo(min) < 0;
-                BigInteger requiredStart = crossedBoundary ? (increment.signum() > 0 ? min : max) : expectedStart;
-                if (!start.equals(requiredStart) || (crossedBoundary && !sequence.isCycle())) {
-                    throw new UserException("External sequence segments are not contiguous");
-                }
-                if (crossedBoundary) {
-                    try {
-                        epoch = Math.addExact(epoch, 1);
-                    } catch (ArithmeticException e) {
-                        throw new UserException("External sequence cycle epoch overflow");
-                    }
-                }
+            if (expectedStart != null && !start.equals(expectedStart)) {
+                throw new UserException("External sequence response did not restart at " + expectedStart);
             }
-            result.add(new Sequence.RangeSegment(start, increment, segment.getCount(), epoch));
-            expectedStart = last.add(increment);
-        }
-        if (total != requestedCount) {
-            throw new UserException("External sequence provider returned " + total
-                    + " values, but " + requestedCount + " were requested");
+            result.add(new Sequence.RangeSegment(start, increment, response.getSize()));
+            remaining -= response.getSize();
+            if (remaining == 0) {
+                break;
+            }
+
+            BigInteger next = last.add(increment);
+            boolean crossedBoundary = increment.signum() > 0
+                    ? next.compareTo(max) > 0 : next.compareTo(min) < 0;
+            if (!crossedBoundary) {
+                throw new UserException("External sequence provider returned fewer values before reaching the limit");
+            }
+            if (!sequence.isCycle()) {
+                throw new UserException("Sequence " + sequence.getName() + " has insufficient values for allocation");
+            }
+            expectedStart = increment.signum() > 0 ? min : max;
         }
         return result;
     }

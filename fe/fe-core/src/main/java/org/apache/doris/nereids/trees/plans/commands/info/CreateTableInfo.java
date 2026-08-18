@@ -26,9 +26,11 @@ import org.apache.doris.analysis.PartitionDesc;
 import org.apache.doris.analysis.TableName;
 import org.apache.doris.catalog.AggregateType;
 import org.apache.doris.catalog.Column;
+import org.apache.doris.catalog.Database;
 import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.Index;
 import org.apache.doris.catalog.KeysType;
+import org.apache.doris.catalog.Sequence;
 import org.apache.doris.catalog.Type;
 import org.apache.doris.common.Config;
 import org.apache.doris.common.ErrorCode;
@@ -549,6 +551,7 @@ public class CreateTableInfo {
         keysSet.addAll(keys);
         columns.forEach(c -> c.validate(engineName.equals(ENGINE_OLAP), keysSet, finalEnableMergeOnWrite,
                 keysType));
+        validateSequenceDefaults();
 
         // validate index
         if (!indexes.isEmpty()) {
@@ -757,6 +760,24 @@ public class CreateTableInfo {
         }
     }
 
+    private void validateSequenceDefaults() {
+        for (ColumnDefinition column : columns) {
+            column.getDefaultSequenceNameParts().ifPresent(nameParts -> {
+                if (!engineName.equals(ENGINE_OLAP) || !InternalCatalog.INTERNAL_CATALOG_NAME.equals(ctlName)) {
+                    throw new AnalysisException("Sequence NEXTVAL default is only supported for internal OLAP tables");
+                }
+                String sequenceDbName = nameParts.size() == 2 ? nameParts.get(0) : dbName;
+                String sequenceName = nameParts.get(nameParts.size() - 1);
+                Database sequenceDb = Env.getCurrentInternalCatalog().getDbNullable(sequenceDbName);
+                Sequence sequence = sequenceDb == null ? null : sequenceDb.getSequenceNullable(sequenceName);
+                if (sequence == null) {
+                    throw new AnalysisException("Unknown sequence '" + sequenceDbName + "." + sequenceName + "'");
+                }
+                column.qualifyDefaultSequence(sequenceDbName);
+            });
+        }
+    }
+
     /**
      * translate to catalog create table stmt
      */
@@ -815,4 +836,3 @@ public class CreateTableInfo {
         return distribution;
     }
 }
-
