@@ -45,7 +45,7 @@ class SequenceTest {
     @Test
     void splitsPositiveCycleAtBoundary() throws Exception {
         Sequence sequence = sequence(BigInteger.valueOf(8), BigInteger.ONE, BigInteger.ONE,
-                BigInteger.TEN, 10, true);
+                BigInteger.TEN, 8, true);
         java.util.List<Sequence.RangeSegment> segments = sequence.allocate(5, 1,
                 (id, version, state) -> 1).getSegments();
 
@@ -60,7 +60,7 @@ class SequenceTest {
     @Test
     void splitsNegativeCycleAtBoundary() throws Exception {
         Sequence sequence = sequence(BigInteger.valueOf(-8), BigInteger.valueOf(-1), BigInteger.valueOf(-10),
-                BigInteger.valueOf(-1), 10, true);
+                BigInteger.valueOf(-1), 8, true);
         java.util.List<Sequence.RangeSegment> segments = sequence.allocate(5, 1,
                 (id, version, state) -> 1).getSegments();
 
@@ -100,6 +100,25 @@ class SequenceTest {
                 BigInteger.ONE, BigInteger.TEN, 1, false));
         Assertions.assertThrows(AnalysisException.class, () -> sequence(BigInteger.ONE, BigInteger.valueOf(3),
                 BigInteger.ONE, BigInteger.TEN, 5, true));
+        Assertions.assertThrows(AnalysisException.class, () -> sequence(BigInteger.ONE, BigInteger.valueOf(3),
+                BigInteger.ONE, BigInteger.TEN, 3, true));
+        Assertions.assertThrows(AnalysisException.class, () -> sequence(BigInteger.ONE, BigInteger.ONE,
+                BigInteger.ONE, BigInteger.TEN, 1, false));
+        Assertions.assertThrows(AnalysisException.class, () -> sequence(BigInteger.ONE, BigInteger.valueOf(9),
+                BigInteger.ONE, BigInteger.TEN, 2, false));
+        Assertions.assertThrows(AnalysisException.class, () -> sequence(BigInteger.TEN, BigInteger.valueOf(-9),
+                BigInteger.ONE, BigInteger.TEN, 2, false));
+        Assertions.assertDoesNotThrow(() -> sequence(BigInteger.ONE, BigInteger.valueOf(3),
+                BigInteger.ONE, BigInteger.TEN, 2, true));
+    }
+
+    @Test
+    void alterRejectsCacheEqualToCycleCapacity() throws Exception {
+        Sequence sequence = sequence(BigInteger.ONE, BigInteger.valueOf(3), BigInteger.ONE,
+                BigInteger.TEN, 3, false);
+
+        Assertions.assertThrows(AnalysisException.class,
+                () -> sequence.alteredCopy(null, null, null, null, true, false, null));
     }
 
     @Test
@@ -109,6 +128,7 @@ class SequenceTest {
         Sequence restored = GsonUtils.GSON.fromJson(GsonUtils.GSON.toJson(sequence), Sequence.class);
 
         Assertions.assertEquals(BigInteger.valueOf(4), restored.getNextValue());
+        Assertions.assertEquals(BigInteger.valueOf(3), restored.getLastValue());
         Assertions.assertEquals(BigInteger.ONE, restored.getIncrement());
         Assertions.assertEquals(1, restored.getVersion());
     }
@@ -153,12 +173,17 @@ class SequenceTest {
     }
 
     @Test
-    void restartWithoutValueUsesOriginalStart() throws Exception {
+    void restartWithoutValueUsesSequenceBoundary() throws Exception {
         Sequence sequence = sequence(BigInteger.valueOf(7), BigInteger.ONE, BigInteger.ONE,
                 BigInteger.TEN, 2, false);
         sequence.allocate(2, 1, (id, version, state) -> 1);
         Sequence restarted = sequence.alteredCopy(null, null, null, null, null, true, null);
-        Assertions.assertEquals(BigInteger.valueOf(7), restarted.getNextValue());
+        Assertions.assertEquals(BigInteger.ONE, restarted.getNextValue());
+
+        Sequence descending = sequence(BigInteger.valueOf(-7), BigInteger.ONE.negate(), BigInteger.TEN.negate(),
+                BigInteger.ONE.negate(), 2, false);
+        Sequence descendingRestarted = descending.alteredCopy(null, null, null, null, null, true, null);
+        Assertions.assertEquals(BigInteger.ONE.negate(), descendingRestarted.getNextValue());
     }
 
     @Test
@@ -187,16 +212,49 @@ class SequenceTest {
     }
 
     @Test
-    void alterBoundsValidateNextValueInsteadOfHistoricalStart() throws Exception {
+    void alterBoundsValidateLastAllocatedValue() throws Exception {
         Sequence sequence = sequence(BigInteger.ONE, BigInteger.ONE, BigInteger.ONE,
                 BigInteger.TEN, 10, false);
         sequence.allocate(7, 1, (id, version, state) -> 1);
 
-        Sequence altered = sequence.alteredCopy(null, BigInteger.valueOf(8), null,
+        Assertions.assertThrows(AnalysisException.class,
+                () -> sequence.alteredCopy(null, BigInteger.valueOf(8), null,
+                        null, null, false, null));
+        Sequence altered = sequence.alteredCopy(null, BigInteger.valueOf(7), null,
                 null, null, false, null);
         Assertions.assertEquals(BigInteger.valueOf(8), altered.getNextValue());
+        Assertions.assertEquals(BigInteger.valueOf(7),
+                altered.alteredCopy(null, null, null, null, null, true, null).getNextValue());
+    }
+
+    @Test
+    void localAlterValidatesLastValueAndRecomputesNextValue() throws Exception {
+        Sequence sequence = sequence(BigInteger.ONE, BigInteger.ONE, BigInteger.ZERO,
+                BigInteger.TEN, 5, false);
+        sequence.allocate(5, 1, (id, version, state) -> 1);
+        Assertions.assertEquals(BigInteger.valueOf(5), sequence.getLastValue());
+        Assertions.assertEquals(BigInteger.valueOf(6), sequence.getNextValue());
+
+        Sequence exhausted = sequence.alteredCopy(null, null, BigInteger.valueOf(5),
+                null, null, false, null);
+        Assertions.assertTrue(exhausted.isExhausted());
+        Assertions.assertThrows(UserException.class,
+                () -> exhausted.allocate(1, exhausted.getVersion(), (id, version, state) -> 2));
         Assertions.assertThrows(AnalysisException.class,
-                () -> altered.alteredCopy(null, null, null, null, null, true, null));
+                () -> sequence.alteredCopy(null, BigInteger.valueOf(6), null,
+                        null, null, false, null));
+
+        Sequence changedIncrement = sequence.alteredCopy(BigInteger.valueOf(2), null, null,
+                null, null, false, null);
+        Assertions.assertEquals(BigInteger.valueOf(7), changedIncrement.getNextValue());
+    }
+
+    @Test
+    void validatesOracleSequenceNumericRange() {
+        Assertions.assertThrows(AnalysisException.class, () -> sequence(BigInteger.ONE, BigInteger.ONE,
+                Sequence.NEGATIVE_DEFAULT_MIN.subtract(BigInteger.ONE), BigInteger.TEN, 2, false));
+        Assertions.assertThrows(AnalysisException.class, () -> sequence(BigInteger.ONE, BigInteger.ONE,
+                BigInteger.ONE, Sequence.POSITIVE_DEFAULT_MAX.add(BigInteger.ONE), 2, false));
     }
 
     private static Sequence sequence(BigInteger start, BigInteger increment, BigInteger min, BigInteger max,

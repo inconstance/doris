@@ -26,6 +26,8 @@ import java.math.BigInteger;
 import java.util.concurrent.atomic.AtomicInteger;
 
 class ExternalSequenceAllocatorTest {
+    private static final Sequence.StatePersister PERSISTER = (id, version, state) -> 1;
+
     @Test
     void assemblesTruncatedCycleResponses() throws Exception {
         Sequence sequence = new Sequence(10, 20, "seq", BigInteger.valueOf(8), BigInteger.ONE,
@@ -42,11 +44,11 @@ class ExternalSequenceAllocatorTest {
             return new ExternalSequenceProvider.Response(BigInteger.ONE, BigInteger.ONE, 2);
         });
 
-        Sequence.AllocationResult result = ExternalSequenceAllocator.allocate("db", sequence, 5, 1);
+        Sequence.AllocationResult result = ExternalSequenceAllocator.allocate("db", sequence, 5, 1, PERSISTER);
         Assertions.assertEquals(2, result.getSegments().size());
         Assertions.assertEquals(2, calls.get());
-        // The external provider is the cursor authority; FE does not advance or journal local allocation state.
-        Assertions.assertEquals(BigInteger.valueOf(8), sequence.getNextValue());
+        Assertions.assertEquals(BigInteger.valueOf(2), sequence.getLastValue());
+        Assertions.assertEquals(BigInteger.valueOf(3), sequence.getNextValue());
     }
 
     @Test
@@ -56,9 +58,24 @@ class ExternalSequenceAllocatorTest {
         ExternalSequenceAllocator.setProvider(request ->
                 new ExternalSequenceProvider.Response(BigInteger.ONE, BigInteger.ONE, request.getSize()));
 
-        long first = ExternalSequenceAllocator.allocate("db", sequence, 1, 1).getAllocationTicket();
-        long second = ExternalSequenceAllocator.allocate("db", sequence, 1, 1).getAllocationTicket();
+        long first = ExternalSequenceAllocator.allocate("db", sequence, 1, 1, PERSISTER).getAllocationTicket();
+        long second = ExternalSequenceAllocator.allocate("db", sequence, 1, 1, PERSISTER).getAllocationTicket();
         Assertions.assertTrue(second > first);
+    }
+
+    @Test
+    void alterUsesLastValueObservedFromExternalAllocation() throws Exception {
+        Sequence sequence = new Sequence(10, 20, "seq", BigInteger.ONE, BigInteger.ONE,
+                BigInteger.ONE, BigInteger.TEN, 2, false);
+        ExternalSequenceAllocator.setProvider(request ->
+                new ExternalSequenceProvider.Response(BigInteger.valueOf(4), BigInteger.ONE, request.getSize()));
+
+        ExternalSequenceAllocator.allocate("db", sequence, 2, 1, PERSISTER);
+        Sequence altered = sequence.alteredCopy(BigInteger.valueOf(2), null, null,
+                null, null, false, null);
+
+        Assertions.assertEquals(BigInteger.valueOf(5), sequence.getLastValue());
+        Assertions.assertEquals(BigInteger.valueOf(7), altered.getNextValue());
     }
 
     @Test
@@ -68,7 +85,7 @@ class ExternalSequenceAllocatorTest {
         ExternalSequenceAllocator.setProvider(request ->
                 new ExternalSequenceProvider.Response(BigInteger.valueOf(9), BigInteger.ONE, 2));
         Assertions.assertThrows(UserException.class,
-                () -> ExternalSequenceAllocator.allocate("db", noCycle, 4, 1));
+                () -> ExternalSequenceAllocator.allocate("db", noCycle, 4, 1, PERSISTER));
     }
 
     @Test
@@ -78,7 +95,7 @@ class ExternalSequenceAllocatorTest {
         ExternalSequenceAllocator.setProvider(request ->
                 new ExternalSequenceProvider.Response(BigInteger.valueOf(7), BigInteger.ONE, 2));
         Assertions.assertThrows(UserException.class,
-                () -> ExternalSequenceAllocator.allocate("db", cycle, 4, 1));
+                () -> ExternalSequenceAllocator.allocate("db", cycle, 4, 1, PERSISTER));
     }
 
     @Test
@@ -90,7 +107,7 @@ class ExternalSequenceAllocatorTest {
                 ? new ExternalSequenceProvider.Response(BigInteger.valueOf(-9), BigInteger.ONE.negate(), 2)
                 : new ExternalSequenceProvider.Response(BigInteger.ONE.negate(), BigInteger.ONE.negate(), 2));
 
-        Sequence.AllocationResult result = ExternalSequenceAllocator.allocate("db", sequence, 4, 1);
+        Sequence.AllocationResult result = ExternalSequenceAllocator.allocate("db", sequence, 4, 1, PERSISTER);
         Assertions.assertEquals(2, result.getSegments().size());
         Assertions.assertEquals(BigInteger.ONE.negate(), result.getSegments().get(1).getStartValue());
     }

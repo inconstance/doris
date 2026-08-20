@@ -40,7 +40,7 @@ public final class ExternalSequenceAllocator {
     }
 
     public static Sequence.AllocationResult allocate(String dbName, Sequence sequence,
-            long count, long expectedVersion) throws UserException {
+            long count, long expectedVersion, Sequence.StatePersister persister) throws UserException {
         ExternalSequenceProvider currentProvider = provider;
         if (currentProvider == null) {
             throw new UserException("External sequence provider is not initialized");
@@ -49,7 +49,9 @@ public final class ExternalSequenceAllocator {
             sequence.validateAllocationRequest(count, expectedVersion);
             List<Sequence.RangeSegment> segments = allocateSegments(
                     currentProvider, dbName, sequence, count);
-            return new Sequence.AllocationResult(segments, sequence.getVersion(), nextArrivalTicket());
+            long allocationTicket = nextArrivalTicket();
+            sequence.commitExternalAllocation(segments, expectedVersion, persister);
+            return new Sequence.AllocationResult(segments, sequence.getVersion(), allocationTicket);
         }
     }
 

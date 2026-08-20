@@ -3771,7 +3771,9 @@ public class InternalCatalog implements CatalogIf<Database> {
                 throw new MetaNotFoundException("Unknown sequence id: " + sequenceId);
             }
             if ("EXTERNAL".equalsIgnoreCase(Config.sequence_allocator_type)) {
-                return ExternalSequenceAllocator.allocate(db.getFullName(), sequence, count, expectedVersion);
+                return ExternalSequenceAllocator.allocate(db.getFullName(), sequence, count, expectedVersion,
+                        (id, version, state) -> Env.getCurrentEnv().getEditLog().logUpdateSequenceState(
+                                SequencePersistInfo.state(dbId, id, version, state)));
             }
             if (!"LOCAL".equalsIgnoreCase(Config.sequence_allocator_type)) {
                 throw new UserException("Unknown sequence_allocator_type: " + Config.sequence_allocator_type);

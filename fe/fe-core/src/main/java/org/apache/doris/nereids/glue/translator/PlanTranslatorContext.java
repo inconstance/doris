@@ -228,6 +228,8 @@ public class PlanTranslatorContext {
         srcFragment.getBuilderRuntimeFilterIds().forEach(targetFragment::setBuilderRuntimeFilterIds);
         targetFragment.setHasColocatePlanNode(targetFragment.hasColocatePlanNode()
                 || srcFragment.hasColocatePlanNode());
+        targetFragment.setHasSequencePlanNode(targetFragment.hasSequencePlanNode()
+                || srcFragment.hasSequencePlanNode());
         this.planFragments.remove(srcFragment);
     }
 

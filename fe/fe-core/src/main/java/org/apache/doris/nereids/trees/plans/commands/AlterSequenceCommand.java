@@ -96,8 +96,8 @@ public class AlterSequenceCommand extends Command implements ForwardWithSync {
         }
         try {
             long parsed = Long.parseLong(value);
-            if (parsed <= 0) {
-                throw new AnalysisException("CACHE must be positive, or use NOCACHE");
+            if (parsed < 2) {
+                throw new AnalysisException("CACHE must be at least 2, or use NOCACHE");
             }
             return parsed;
         } catch (NumberFormatException e) {

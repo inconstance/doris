@@ -26,6 +26,7 @@ import org.apache.doris.nereids.trees.expressions.Slot;
 import org.apache.doris.nereids.trees.plans.Plan;
 import org.apache.doris.nereids.trees.plans.PlanType;
 import org.apache.doris.nereids.trees.plans.visitor.PlanVisitor;
+import org.apache.doris.nereids.util.Utils;
 import org.apache.doris.statistics.Statistics;
 
 import com.google.common.base.Preconditions;
@@ -51,6 +52,13 @@ public class PhysicalSequence<CHILD_TYPE extends Plan> extends PhysicalUnary<CHI
 
     public List<Alias> getSequenceAliases() {
         return sequenceAliases;
+    }
+
+    @Override
+    public String toString() {
+        return Utils.toSqlString("PhysicalSequence",
+                "stats", statistics,
+                "sequences", sequenceAliases);
     }
 
     @Override

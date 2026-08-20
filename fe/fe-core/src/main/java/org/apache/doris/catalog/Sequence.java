@@ -21,7 +21,6 @@ import org.apache.doris.common.AnalysisException;
 import org.apache.doris.common.UserException;
 import org.apache.doris.persist.gson.GsonPostProcessable;
 
-import com.google.common.base.Preconditions;
 import com.google.gson.annotations.SerializedName;
 
 import java.io.IOException;
@@ -38,8 +37,6 @@ public class Sequence implements GsonPostProcessable {
     public static final BigInteger NEGATIVE_DEFAULT_MIN = BigInteger.TEN.pow(27).subtract(BigInteger.ONE).negate();
     public static final BigInteger NEGATIVE_DEFAULT_MAX = BigInteger.ONE.negate();
     public static final long DEFAULT_CACHE_SIZE = 20;
-    private static final BigInteger INT128_MIN = BigInteger.ONE.shiftLeft(127).negate();
-    private static final BigInteger INT128_MAX = BigInteger.ONE.shiftLeft(127).subtract(BigInteger.ONE);
 
     @SerializedName("id")
     private long id;
@@ -61,6 +58,8 @@ public class Sequence implements GsonPostProcessable {
     private boolean cycle;
     @SerializedName("nextValue")
     private String nextValue;
+    @SerializedName("lastValue")
+    private String lastValue;
     @SerializedName("exhausted")
     private boolean exhausted;
     @SerializedName("version")
@@ -82,6 +81,7 @@ public class Sequence implements GsonPostProcessable {
         this.cacheSize = cacheSize;
         this.cycle = cycle;
         this.nextValue = this.startValue;
+        this.lastValue = null;
         this.version = 1;
     }
 
@@ -96,25 +96,29 @@ public class Sequence implements GsonPostProcessable {
         if (min.compareTo(max) >= 0) {
             throw new AnalysisException("MINVALUE must be less than MAXVALUE");
         }
+        BigInteger range = max.subtract(min);
+        if (step.abs().compareTo(range) >= 0) {
+            throw new AnalysisException("INCREMENT BY must be less than MAXVALUE minus MINVALUE");
+        }
         if (start.compareTo(min) < 0 || start.compareTo(max) > 0) {
             throw new AnalysisException("START WITH must be between MINVALUE and MAXVALUE");
         }
-        checkInt128("START WITH", start);
-        checkInt128("INCREMENT BY", step);
-        checkInt128("MINVALUE", min);
-        checkInt128("MAXVALUE", max);
-        if (cacheSize < 0) {
-            throw new AnalysisException("CACHE must be positive, or use NOCACHE");
+        checkOracleRange("START WITH", start);
+        checkOracleRange("INCREMENT BY", step);
+        checkOracleRange("MINVALUE", min);
+        checkOracleRange("MAXVALUE", max);
+        if (cacheSize < 0 || cacheSize == 1) {
+            throw new AnalysisException("CACHE must be at least 2, or use NOCACHE");
         }
-        BigInteger capacity = max.subtract(min).divide(step.abs()).add(BigInteger.ONE);
-        if (cycle && cacheSize > 0 && BigInteger.valueOf(cacheSize).compareTo(capacity) > 0) {
-            throw new AnalysisException("CACHE size must not exceed the number of values in one cycle");
+        BigInteger cycleSize = range.add(step.abs()).subtract(BigInteger.ONE).divide(step.abs());
+        if (cycle && cacheSize > 0 && BigInteger.valueOf(cacheSize).compareTo(cycleSize) >= 0) {
+            throw new AnalysisException("CACHE size must be less than the number of values in one cycle");
         }
     }
 
-    private static void checkInt128(String property, BigInteger value) throws AnalysisException {
-        if (value.compareTo(INT128_MIN) < 0 || value.compareTo(INT128_MAX) > 0) {
-            throw new AnalysisException(property + " is outside the LARGEINT range");
+    private static void checkOracleRange(String property, BigInteger value) throws AnalysisException {
+        if (value.compareTo(NEGATIVE_DEFAULT_MIN) < 0 || value.compareTo(POSITIVE_DEFAULT_MAX) > 0) {
+            throw new AnalysisException(property + " exceeds the Oracle Sequence numeric range");
         }
     }
 
@@ -137,6 +141,9 @@ public class Sequence implements GsonPostProcessable {
         BigInteger parsedMin = parseCanonical("MINVALUE", minValue);
         BigInteger parsedMax = parseCanonical("MAXVALUE", maxValue);
         parseCanonical("next value", nextValue);
+        if (lastValue != null) {
+            parseCanonical("last value", lastValue);
+        }
         try {
             validateDefinition(parsedStart, parsedIncrement, parsedMin, parsedMax, cacheSize, cycle);
         } catch (AnalysisException e) {
@@ -147,10 +154,36 @@ public class Sequence implements GsonPostProcessable {
     /** Atomically decides, persists and commits an allocation while holding the sequence lock. */
     public synchronized AllocationResult allocate(long count, long expectedVersion, StatePersister persister)
             throws UserException {
-        PendingAllocation allocation = prepareAllocation(count, expectedVersion);
+        PreparedAllocation allocation = prepareAllocation(count, expectedVersion);
         long allocationTicket = persister.persist(id, expectedVersion, allocation.newState);
-        commit(allocation);
+        applyState(allocation.newState);
         return new AllocationResult(allocation.segments, expectedVersion, allocationTicket);
+    }
+
+    /** Persists the allocation state observed from an external allocator. */
+    public synchronized void commitExternalAllocation(List<RangeSegment> segments, long expectedVersion,
+            StatePersister persister) throws UserException {
+        if (expectedVersion != version) {
+            throw new UserException("Stale sequence version " + expectedVersion + ", current version is " + version);
+        }
+        BigInteger observedLast = lastValue(segments);
+        BigInteger step = getIncrement();
+        BigInteger min = getMinValue();
+        BigInteger max = getMaxValue();
+        BigInteger candidate = observedLast.add(step);
+        boolean beyond = step.signum() > 0 ? candidate.compareTo(max) > 0 : candidate.compareTo(min) < 0;
+        BigInteger observedNext = candidate;
+        boolean observedExhausted = false;
+        if (beyond && cycle) {
+            observedNext = step.signum() > 0 ? min : max;
+        } else if (beyond) {
+            observedNext = observedLast;
+            observedExhausted = true;
+        }
+        AllocationState state = new AllocationState(
+                observedNext.toString(), observedLast.toString(), observedExhausted);
+        persister.persist(id, expectedVersion, state);
+        applyState(state);
     }
 
     /** Validates request properties shared by local and external allocators. */
@@ -178,16 +211,35 @@ public class Sequence implements GsonPostProcessable {
         BigInteger newMax = alteredMax == null ? getMaxValue() : alteredMax;
         long newCacheSize = alteredCacheSize == null ? cacheSize : alteredCacheSize;
         boolean newCycle = alteredCycle == null ? cycle : alteredCycle;
-        BigInteger newNext = restart ? (restartValue == null ? getStartValue() : restartValue) : getNextValue();
-        // START WITH is historical metadata after the sequence has advanced. ALTER validates the value
-        // that can actually be issued next; a bare RESTART deliberately validates the original start.
-        BigInteger validationValue = exhausted && !restart
-                ? (newIncrement.signum() > 0 ? newMax : newMin) : newNext;
-        validateDefinition(validationValue, newIncrement, newMin, newMax, newCacheSize, newCycle);
-        if ((!exhausted || restart) && (newNext.compareTo(newMin) < 0 || newNext.compareTo(newMax) > 0)) {
-            throw new AnalysisException("Sequence next value must be between MINVALUE and MAXVALUE after ALTER");
+        BigInteger current = lastValue == null ? null : new BigInteger(lastValue);
+        BigInteger newNext = getNextValue();
+        boolean newExhausted = exhausted;
+
+        if (restart) {
+            newNext = restartValue == null ? (newIncrement.signum() > 0 ? newMin : newMax) : restartValue;
+            newExhausted = false;
+        } else if (current != null) {
+            BigInteger candidate = current.add(newIncrement);
+            boolean beyond = newIncrement.signum() > 0
+                    ? candidate.compareTo(newMax) > 0 : candidate.compareTo(newMin) < 0;
+            if (beyond && newCycle) {
+                newNext = newIncrement.signum() > 0 ? newMin : newMax;
+                newExhausted = false;
+            } else if (beyond) {
+                newNext = current;
+                newExhausted = true;
+            } else {
+                newNext = candidate;
+                newExhausted = false;
+            }
         }
-        checkInt128("RESTART WITH", newNext);
+
+        BigInteger validationValue = restart ? newNext
+                : current == null ? newNext : current;
+        if (restart) {
+            checkOracleRange("RESTART WITH", newNext);
+        }
+        validateDefinition(validationValue, newIncrement, newMin, newMax, newCacheSize, newCycle);
 
         Sequence altered = new Sequence();
         altered.id = id;
@@ -200,7 +252,8 @@ public class Sequence implements GsonPostProcessable {
         altered.cacheSize = newCacheSize;
         altered.cycle = newCycle;
         altered.nextValue = newNext.toString();
-        altered.exhausted = restart ? false : exhausted;
+        altered.lastValue = restart ? null : lastValue;
+        altered.exhausted = newExhausted;
         altered.version = Math.addExact(version, 1);
         return altered;
     }
@@ -218,12 +271,13 @@ public class Sequence implements GsonPostProcessable {
         renamed.cacheSize = cacheSize;
         renamed.cycle = cycle;
         renamed.nextValue = nextValue;
+        renamed.lastValue = lastValue;
         renamed.exhausted = exhausted;
         renamed.version = Math.addExact(version, 1);
         return renamed;
     }
 
-    synchronized PendingAllocation prepareAllocation(long count, long expectedVersion) throws UserException {
+    synchronized PreparedAllocation prepareAllocation(long count, long expectedVersion) throws UserException {
         validateAllocationRequest(count, expectedVersion);
         if (exhausted) {
             throw new UserException("Sequence " + name + " has reached its limit");
@@ -252,13 +306,18 @@ public class Sequence implements GsonPostProcessable {
                 if (remaining > 0) {
                     throw new UserException("Sequence " + name + " has insufficient values for allocation");
                 }
-                return new PendingAllocation(this, segments,
-                        new AllocationState(current.toString(), true), version);
+                return new PreparedAllocation(segments,
+                        new AllocationState(current.toString(), lastValue(segments).toString(), true));
             }
             current = step.signum() > 0 ? min : max;
         }
-        return new PendingAllocation(this, segments,
-                new AllocationState(current.toString(), false), version);
+        return new PreparedAllocation(segments,
+                new AllocationState(current.toString(), lastValue(segments).toString(), false));
+    }
+
+    private static BigInteger lastValue(List<RangeSegment> segments) {
+        RangeSegment segment = segments.get(segments.size() - 1);
+        return segment.startValue.add(segment.increment.multiply(BigInteger.valueOf(segment.count - 1)));
     }
 
     private static BigInteger valuesUntilBoundary(BigInteger current, BigInteger step,
@@ -267,11 +326,10 @@ public class Sequence implements GsonPostProcessable {
         return distance.divide(step.abs()).add(BigInteger.ONE);
     }
 
-    private synchronized void commit(PendingAllocation allocation) {
-        Preconditions.checkState(allocation.owner == this, "Allocation belongs to another sequence");
-        Preconditions.checkState(allocation.expectedVersion == version, "Sequence changed before allocation commit");
-        nextValue = allocation.newState.nextValue;
-        exhausted = allocation.newState.exhausted;
+    private void applyState(AllocationState state) {
+        nextValue = state.nextValue;
+        lastValue = state.lastValue;
+        exhausted = state.exhausted;
     }
 
     /** Applies a state advance while replaying the edit log. */
@@ -279,8 +337,7 @@ public class Sequence implements GsonPostProcessable {
         if (expectedVersion != version) {
             return;
         }
-        nextValue = state.nextValue;
-        exhausted = state.exhausted;
+        applyState(state);
     }
 
     public long getId() {
@@ -313,6 +370,10 @@ public class Sequence implements GsonPostProcessable {
 
     public BigInteger getNextValue() {
         return new BigInteger(nextValue);
+    }
+
+    public BigInteger getLastValue() {
+        return lastValue == null ? null : new BigInteger(lastValue);
     }
 
     public long getCacheSize() {
@@ -372,19 +433,26 @@ public class Sequence implements GsonPostProcessable {
     public static class AllocationState {
         @SerializedName("nextValue")
         private String nextValue;
+        @SerializedName("lastValue")
+        private String lastValue;
         @SerializedName("exhausted")
         private boolean exhausted;
 
         private AllocationState() {
         }
 
-        public AllocationState(String nextValue, boolean exhausted) {
+        public AllocationState(String nextValue, String lastValue, boolean exhausted) {
             this.nextValue = nextValue;
+            this.lastValue = lastValue;
             this.exhausted = exhausted;
         }
 
         public String getNextValue() {
             return nextValue;
+        }
+
+        public String getLastValue() {
+            return lastValue;
         }
 
         public boolean isExhausted() {
@@ -416,33 +484,13 @@ public class Sequence implements GsonPostProcessable {
         }
     }
 
-    public static class PendingAllocation {
-        private final Sequence owner;
+    static class PreparedAllocation {
         private final List<RangeSegment> segments;
         private final AllocationState newState;
-        private final long expectedVersion;
-        private boolean committed;
 
-        private PendingAllocation(Sequence owner, List<RangeSegment> segments,
-                AllocationState newState, long expectedVersion) {
-            this.owner = owner;
+        private PreparedAllocation(List<RangeSegment> segments, AllocationState newState) {
             this.segments = Collections.unmodifiableList(segments);
             this.newState = newState;
-            this.expectedVersion = expectedVersion;
-        }
-
-        public List<RangeSegment> getSegments() {
-            return segments;
-        }
-
-        public AllocationState getNewState() {
-            return newState;
-        }
-
-        synchronized void commit() {
-            Preconditions.checkState(!committed, "Allocation has already been committed");
-            owner.commit(this);
-            committed = true;
         }
     }
 

@@ -123,6 +123,11 @@ Status SequenceOperatorX::pull(RuntimeState* state, Block* block, bool* eos) {
     auto& local_state = get_local_state(state);
     SCOPED_TIMER(local_state.exec_time_counter());
     const size_t rows = block->rows();
+    if (get_child()->row_desc().num_materialized_slots() == 0) {
+        // A zero-slot child may use internal columns to preserve its row count. They are not part
+        // of the RowDescriptor and must not shift descriptor-based Sequence output slots.
+        block->erase_tail(0);
+    }
     for (const auto& spec : _sequences) {
         const auto* slot = _descs.get_slot_descriptor(SlotId(spec.output_slot_id));
         if (slot == nullptr) {
