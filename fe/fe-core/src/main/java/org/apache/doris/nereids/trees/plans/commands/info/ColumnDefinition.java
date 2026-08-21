@@ -154,6 +154,16 @@ public class ColumnDefinition {
         return type;
     }
 
+    public Optional<List<String>> getDefaultSequenceNameParts() {
+        return defaultValue.filter(DefaultValue::isSequenceNextVal).map(DefaultValue::getSequenceNameParts);
+    }
+
+    public void qualifyDefaultSequence(String dbName) {
+        getDefaultSequenceNameParts().filter(parts -> parts.size() == 1)
+                .ifPresent(parts -> defaultValue = Optional.of(new DefaultValue(
+                        ImmutableList.of(dbName, parts.get(0)))));
+    }
+
     public AggregateType getAggType() {
         return aggType;
     }
@@ -447,8 +457,13 @@ public class ColumnDefinition {
                     "Can not set null default value to non nullable column: " + name);
         }
 
+        if (defaultValue.isPresent() && defaultValue.get().isSequenceNextVal() && !type.isIntegralType()) {
+            throw new AnalysisException("Sequence NEXTVAL default requires an integer column: " + name);
+        }
+
         if (defaultValue.isPresent()
                 && defaultValue.get().getValue() != null
+                && !defaultValue.get().isSequenceNextVal()
                 && type.toCatalogDataType().isScalarType()) {
             try {
                 ColumnDef.validateDefaultValue(type.toCatalogDataType(),

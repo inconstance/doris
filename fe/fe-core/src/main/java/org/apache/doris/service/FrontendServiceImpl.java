@@ -2947,8 +2947,7 @@ public class FrontendServiceImpl implements FrontendService.Iface {
                 result.addToSegments(new TSequenceRangeSegment()
                         .setStartValue(segment.getStartValue().toString())
                         .setIncrement(segment.getIncrement().toString())
-                        .setCount(segment.getCount())
-                        .setCycleEpoch(segment.getCycleEpoch()));
+                        .setCount(segment.getCount()));
             }
             result.setSequenceVersion(allocation.getSequenceVersion());
             result.setAllocationTicket(allocation.getAllocationTicket());

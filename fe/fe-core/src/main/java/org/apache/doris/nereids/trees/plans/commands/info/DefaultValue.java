@@ -24,6 +24,7 @@ import org.apache.doris.nereids.exceptions.AnalysisException;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 
 /**
  * default value of a column.
@@ -75,6 +76,11 @@ public class DefaultValue {
     public DefaultValue(String value, String exprName, Long precision) {
         this.value = value;
         this.defaultValueExprDef = new DefaultValueExprDef(exprName, precision);
+    }
+
+    public DefaultValue(List<String> sequenceNameParts) {
+        this.value = "SEQUENCE_NEXTVAL";
+        this.defaultValueExprDef = new DefaultValueExprDef(sequenceNameParts);
     }
 
     /**
@@ -149,6 +155,14 @@ public class DefaultValue {
 
     public DefaultValueExprDef getDefaultValueExprDef() {
         return defaultValueExprDef;
+    }
+
+    public boolean isSequenceNextVal() {
+        return defaultValueExprDef != null && defaultValueExprDef.isSequenceNextVal();
+    }
+
+    public List<String> getSequenceNameParts() {
+        return defaultValueExprDef.getSequenceNameParts();
     }
 
     /**

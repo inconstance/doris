@@ -50,6 +50,7 @@ import org.apache.doris.nereids.analyzer.UnboundHiveTableSink;
 import org.apache.doris.nereids.analyzer.UnboundIcebergTableSink;
 import org.apache.doris.nereids.analyzer.UnboundJdbcTableSink;
 import org.apache.doris.nereids.analyzer.UnboundMaxComputeTableSink;
+import org.apache.doris.nereids.analyzer.UnboundSequenceValue;
 import org.apache.doris.nereids.analyzer.UnboundSlot;
 import org.apache.doris.nereids.analyzer.UnboundTVFTableSink;
 import org.apache.doris.nereids.analyzer.UnboundTableSink;
@@ -466,6 +467,17 @@ public class BindSink implements AnalysisRuleFactory {
                     replaceMap.put(output.toSlot(), output.child());
                 } else {
                     try {
+                        if (column.hasSequenceDefault()) {
+                            Expression sequenceValue = ExpressionAnalyzer.analyzeFunction(
+                                    boundSink, ctx.cascadesContext,
+                                    new UnboundSequenceValue(column.getDefaultSequenceNameParts(), true));
+                            Alias output = new Alias(TypeCoercionUtils.castIfNotSameType(
+                                    sequenceValue, DataType.fromCatalogType(column.getType())), column.getName());
+                            columnToOutput.put(column.getName(), output);
+                            columnToReplaced.put(column.getName(), output.toSlot());
+                            replaceMap.put(output.toSlot(), output.child());
+                            continue;
+                        }
                         Expression unboundDefaultValue = new NereidsParser().parseExpression(
                                 column.getDefaultValueSql());
                         Expression defualtValueExpression = ExpressionAnalyzer.analyzeFunction(

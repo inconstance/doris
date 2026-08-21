@@ -565,6 +565,14 @@ public class Column implements GsonPostProcessable {
         return this.defaultValue;
     }
 
+    public boolean hasSequenceDefault() {
+        return defaultValueExprDef != null && defaultValueExprDef.isSequenceNextVal();
+    }
+
+    public List<String> getDefaultSequenceNameParts() {
+        return hasSequenceDefault() ? defaultValueExprDef.getSequenceNameParts() : new ArrayList<>();
+    }
+
     public String getDefaultValueSql() {
         if (defaultValue == null) {
             return null;
@@ -638,7 +646,9 @@ public class Column implements GsonPostProcessable {
         tColumn.setIsAutoIncrement(this.isAutoInc);
         tColumn.setIsOnUpdateCurrentTimestamp(this.hasOnUpdateDefaultValue);
         // keep compatibility
-        tColumn.setDefaultValue(this.realDefaultValue == null ? this.defaultValue : this.realDefaultValue);
+        if (!hasSequenceDefault()) {
+            tColumn.setDefaultValue(this.realDefaultValue == null ? this.defaultValue : this.realDefaultValue);
+        }
         tColumn.setVisible(visible);
         toChildrenThrift(this, tColumn);
 

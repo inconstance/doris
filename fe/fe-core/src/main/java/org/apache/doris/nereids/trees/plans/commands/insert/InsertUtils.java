@@ -41,6 +41,7 @@ import org.apache.doris.nereids.analyzer.UnboundIcebergTableSink;
 import org.apache.doris.nereids.analyzer.UnboundInlineTable;
 import org.apache.doris.nereids.analyzer.UnboundJdbcTableSink;
 import org.apache.doris.nereids.analyzer.UnboundMaxComputeTableSink;
+import org.apache.doris.nereids.analyzer.UnboundSequenceValue;
 import org.apache.doris.nereids.analyzer.UnboundSlot;
 import org.apache.doris.nereids.analyzer.UnboundStar;
 import org.apache.doris.nereids.analyzer.UnboundTableSink;
@@ -634,6 +635,9 @@ public class InsertUtils {
             return new Alias(Literal.of(column.getDefaultValue()).checkedCastWithFallback(
                     DataType.fromCatalogType(column.getType())), column.getName());
         } else {
+            if (column.hasSequenceDefault()) {
+                return new UnboundAlias(new UnboundSequenceValue(column.getDefaultSequenceNameParts(), true));
+            }
             Expression defualtValueExpression = new NereidsParser().parseExpression(
                     column.getDefaultValueSql());
             if (!(defualtValueExpression instanceof UnboundAlias)) {
