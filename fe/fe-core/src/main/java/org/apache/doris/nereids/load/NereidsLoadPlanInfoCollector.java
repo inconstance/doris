@@ -121,6 +121,7 @@ public class NereidsLoadPlanInfoCollector extends DefaultPlanVisitor<Void, PlanT
         // the file source slot without transformation must have default value,
         // the default value is its corresponding dest column's default value or null literal
         private Map<SlotId, Expr> srcSlotIdToDefaultValueMap;
+        private Set<String> sequenceDefaultColumns;
         // the filter before column transformation
         private List<Expr> preFilterExprList;
         // the filter after column transformation
@@ -142,6 +143,10 @@ public class NereidsLoadPlanInfoCollector extends DefaultPlanVisitor<Void, PlanT
 
         public OlapTableSink getOlapTableSink() {
             return olapTableSink;
+        }
+
+        public Set<String> getSequenceDefaultColumns() {
+            return sequenceDefaultColumns;
         }
 
         /**
@@ -437,15 +442,20 @@ public class NereidsLoadPlanInfoCollector extends DefaultPlanVisitor<Void, PlanT
         loadPlanInfo.srcTupleId = oneRowTuple.getId();
         loadPlanInfo.srcSlotIds = new ArrayList<>(oneRowTuple.getAllSlotIds());
         loadPlanInfo.srcSlotIdToDefaultValueMap = Maps.newHashMap();
+        loadPlanInfo.sequenceDefaultColumns = new HashSet<>();
         for (SlotDescriptor slotDescriptor : oneRowTuple.getSlots()) {
             Column column = destTable.getColumn(slotDescriptor.getColumn().getName());
             if (column != null) {
                 Expression expression;
                 if (column.getDefaultValue() != null) {
-                    expression = new NereidsParser().parseExpression(column.getDefaultValueSql());
-                    ExpressionAnalyzer analyzer = new ExpressionAnalyzer(
-                            null, new Scope(ImmutableList.of()), null, true, true);
-                    expression = analyzer.analyze(expression);
+                    if (column.hasSequenceDefault()) {
+                        expression = new NullLiteral(VarcharType.SYSTEM_DEFAULT);
+                    } else {
+                        expression = new NereidsParser().parseExpression(column.getDefaultValueSql());
+                        ExpressionAnalyzer analyzer = new ExpressionAnalyzer(
+                                null, new Scope(ImmutableList.of()), null, true, true);
+                        expression = analyzer.analyze(expression);
+                    }
                 } else {
                     if (column.isAllowNull()) {
                         expression = new NullLiteral(VarcharType.SYSTEM_DEFAULT);
@@ -455,6 +465,9 @@ public class NereidsLoadPlanInfoCollector extends DefaultPlanVisitor<Void, PlanT
                 }
                 if (exprMap.containsKey(column.getName())) {
                     continue;
+                }
+                if (column.hasSequenceDefault()) {
+                    loadPlanInfo.sequenceDefaultColumns.add(column.getName());
                 }
                 Expr expr = null;
                 if (expression != null) {

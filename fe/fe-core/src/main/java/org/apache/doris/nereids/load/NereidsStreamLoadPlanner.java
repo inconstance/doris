@@ -38,6 +38,7 @@ import org.apache.doris.planner.FileLoadScanNode;
 import org.apache.doris.planner.PlanFragment;
 import org.apache.doris.planner.PlanFragmentId;
 import org.apache.doris.planner.PlanNodeId;
+import org.apache.doris.planner.PlanNode;
 import org.apache.doris.planner.ScanContext;
 import org.apache.doris.planner.ScanNode;
 import org.apache.doris.qe.ConnectContext;
@@ -261,10 +262,12 @@ public class NereidsStreamLoadPlanner {
         fileScanNode.finalizeForNereids(loadId, Lists.newArrayList(fileGroupInfo), Lists.newArrayList(context),
                 Lists.newArrayList(loadPlanInfo));
         scanNode = fileScanNode;
+        PlanNode planRoot = SequenceDefaultLoadPlanner.wrap(fileScanNode, loadPlanInfo.getDestTuple(),
+                loadPlanInfo.getSequenceDefaultColumns(), descriptorTable, db, destTable);
 
         // for stream load, we only need one fragment, ScanNode -> DataSink.
         // OlapTableSink can dispatch data to corresponding node.
-        PlanFragment fragment = new PlanFragment(new PlanFragmentId(0), scanNode, DataPartition.UNPARTITIONED);
+        PlanFragment fragment = new PlanFragment(new PlanFragmentId(0), planRoot, DataPartition.UNPARTITIONED);
         fragment.setSink(loadPlanInfo.getOlapTableSink());
 
         fragment.finalize(null);
@@ -334,4 +337,5 @@ public class NereidsStreamLoadPlanner {
         params.setIsMowTable(destTable.getEnableUniqueKeyMergeOnWrite());
         return params;
     }
+
 }

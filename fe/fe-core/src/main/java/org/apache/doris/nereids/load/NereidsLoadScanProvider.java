@@ -34,6 +34,7 @@ import org.apache.doris.common.UserException;
 import org.apache.doris.common.util.Util;
 import org.apache.doris.load.loadv2.LoadTask;
 import org.apache.doris.nereids.analyzer.UnboundFunction;
+import org.apache.doris.nereids.analyzer.UnboundSequenceValue;
 import org.apache.doris.nereids.analyzer.UnboundSlot;
 import org.apache.doris.nereids.trees.expressions.EqualTo;
 import org.apache.doris.nereids.trees.expressions.ExprId;
@@ -539,8 +540,7 @@ public class NereidsLoadScanProvider {
                         exprs.add(funcExpr.child(1));
                     } else {
                         if (column.getDefaultValue() != null) {
-                            String exprSql = column.getDefaultValueSql();
-                            exprs.add(NereidsLoadUtils.parseExpressionSeq(exprSql).get(0));
+                            exprs.add(defaultExpression(column));
                         } else {
                             if (column.isAllowNull()) {
                                 exprs.add(new NullLiteral(VarcharType.SYSTEM_DEFAULT));
@@ -559,8 +559,7 @@ public class NereidsLoadScanProvider {
                         innerIfExprs.add(funcExpr.child(1));
                     } else {
                         if (column.getDefaultValue() != null) {
-                            String exprSql = column.getDefaultValueSql();
-                            innerIfExprs.add(NereidsLoadUtils.parseExpressionSeq(exprSql).get(0));
+                            innerIfExprs.add(defaultExpression(column));
                         } else {
                             if (column.isAllowNull()) {
                                 innerIfExprs.add(new NullLiteral(VarcharType.SYSTEM_DEFAULT));
@@ -633,5 +632,12 @@ public class NereidsLoadScanProvider {
             }
         }
         return originExpr;
+    }
+
+    private static Expression defaultExpression(Column column) {
+        if (column.hasSequenceDefault()) {
+            return new UnboundSequenceValue(column.getDefaultSequenceNameParts(), true);
+        }
+        return NereidsLoadUtils.parseExpressionSeq(column.getDefaultValueSql()).get(0);
     }
 }

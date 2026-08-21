@@ -23,6 +23,8 @@ import org.apache.doris.analysis.PartitionNames;
 import org.apache.doris.analysis.TupleDescriptor;
 import org.apache.doris.analysis.UserIdentity;
 import org.apache.doris.catalog.Column;
+import org.apache.doris.catalog.Database;
+import org.apache.doris.catalog.Env;
 import org.apache.doris.catalog.OlapTable;
 import org.apache.doris.catalog.Partition;
 import org.apache.doris.common.LoadException;
@@ -36,6 +38,7 @@ import org.apache.doris.planner.OlapTableSink;
 import org.apache.doris.planner.PlanFragment;
 import org.apache.doris.planner.PlanFragmentId;
 import org.apache.doris.planner.PlanNodeId;
+import org.apache.doris.planner.PlanNode;
 import org.apache.doris.planner.ScanContext;
 import org.apache.doris.planner.ScanNode;
 import org.apache.doris.qe.ConnectContext;
@@ -202,9 +205,16 @@ public class NereidsLoadingTaskPlanner {
                 ScanContext.builder().clusterName(clusterName).build());
         fileScanNode.finalizeForNereids(loadId, fileGroupInfos, contexts, loadPlanInfos);
         scanNodes.add(fileScanNode);
+        HashSet<String> sequenceDefaultColumns = new HashSet<>();
+        for (NereidsLoadPlanInfoCollector.LoadPlanInfo loadPlanInfo : loadPlanInfos) {
+            sequenceDefaultColumns.addAll(loadPlanInfo.getSequenceDefaultColumns());
+        }
+        Database db = Env.getCurrentInternalCatalog().getDbOrMetaException(dbId);
+        PlanNode planRoot = SequenceDefaultLoadPlanner.wrap(fileScanNode,
+                loadPlanInfos.get(0).getDestTuple(), sequenceDefaultColumns, descTable, db, table);
 
         // Create plan fragment
-        PlanFragment sinkFragment = new PlanFragment(new PlanFragmentId(0), fileScanNode, DataPartition.RANDOM);
+        PlanFragment sinkFragment = new PlanFragment(new PlanFragmentId(0), planRoot, DataPartition.RANDOM);
         sinkFragment.setParallelExecNum(loadParallelism);
         sinkFragment.setSink(loadPlanInfos.get(0).getOlapTableSink());
 
