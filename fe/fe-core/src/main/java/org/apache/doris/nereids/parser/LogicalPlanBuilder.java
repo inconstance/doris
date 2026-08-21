@@ -7501,6 +7501,7 @@ public class LogicalPlanBuilder extends DorisParserBaseVisitor<Object> {
                 new EnumMap<>(CreateSequenceCommand.Option.class);
         boolean restart = false;
         BigInteger restartValue = null;
+        String newName = null;
         for (DorisParser.AlterSequenceClauseContext clause : ctx.alterSequenceClause()) {
             if (clause.RESTART() != null) {
                 if (restart) {
@@ -7508,11 +7509,16 @@ public class LogicalPlanBuilder extends DorisParserBaseVisitor<Object> {
                 }
                 restart = true;
                 restartValue = clause.restart == null ? null : new BigInteger(clause.restart.getText());
+            } else if (clause.RENAME() != null) {
+                if (newName != null || restart || !options.isEmpty() || ctx.alterSequenceClause().size() != 1) {
+                    throw new ParseException("RENAME TO cannot be combined with other sequence options", clause);
+                }
+                newName = clause.newName.getText();
             } else {
                 applySequenceOption(options, clause.sequenceOption(), false);
             }
         }
-        return new AlterSequenceCommand(visitMultipartIdentifier(ctx.name), options, restart, restartValue);
+        return new AlterSequenceCommand(visitMultipartIdentifier(ctx.name), options, restart, restartValue, newName);
     }
 
     private void applySequenceOption(Map<CreateSequenceCommand.Option, String> options,

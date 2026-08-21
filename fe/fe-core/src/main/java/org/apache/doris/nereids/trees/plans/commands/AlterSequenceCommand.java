@@ -39,14 +39,16 @@ public class AlterSequenceCommand extends Command implements ForwardWithSync {
     private final Map<CreateSequenceCommand.Option, String> options;
     private final boolean restart;
     private final BigInteger restartValue;
+    private final String newName;
 
     public AlterSequenceCommand(List<String> nameParts, Map<CreateSequenceCommand.Option, String> options,
-            boolean restart, BigInteger restartValue) {
+            boolean restart, BigInteger restartValue, String newName) {
         super(PlanType.ALTER_SEQUENCE_COMMAND);
         this.nameParts = nameParts;
         this.options = new EnumMap<>(options);
         this.restart = restart;
         this.restartValue = restartValue;
+        this.newName = newName;
     }
 
     @Override
@@ -60,6 +62,10 @@ public class AlterSequenceCommand extends Command implements ForwardWithSync {
         Sequence existing = db.getSequenceNullable(resolvedName.sequenceName);
         if (existing == null) {
             throw new AnalysisException("Unknown sequence: " + resolvedName.sequenceName);
+        }
+        if (newName != null) {
+            Env.getCurrentInternalCatalog().renameSequence(db.getId(), resolvedName.sequenceName, newName);
+            return;
         }
 
         BigInteger increment = decimalOption(CreateSequenceCommand.Option.INCREMENT);
@@ -91,8 +97,8 @@ public class AlterSequenceCommand extends Command implements ForwardWithSync {
         }
         try {
             long parsed = Long.parseLong(value);
-            if (parsed <= 0) {
-                throw new AnalysisException("CACHE must be positive, or use NOCACHE");
+            if (parsed < 2) {
+                throw new AnalysisException("CACHE must be at least 2, or use NOCACHE");
             }
             return parsed;
         } catch (NumberFormatException e) {

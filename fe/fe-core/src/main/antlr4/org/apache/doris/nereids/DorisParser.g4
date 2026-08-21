@@ -400,6 +400,7 @@ sequenceInteger
 
 alterSequenceClause
     : RESTART (WITH restart=sequenceInteger)?
+    | RENAME TO newName=identifier
     | sequenceOption
     ;
 

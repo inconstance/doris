@@ -4077,16 +4077,48 @@ public class InternalCatalog implements CatalogIf<Database> {
         }
     }
 
+    public Sequence renameSequence(long dbId, String sequenceName, String newName) throws UserException {
+        Database db = getDbOrDdlException(dbId);
+        db.writeLock();
+        try {
+            Sequence existing = db.getSequenceNullable(sequenceName);
+            if (existing == null) {
+                throw new DdlException("Unknown sequence: " + sequenceName);
+            }
+            if (sequenceName.equalsIgnoreCase(newName)) {
+                throw new DdlException("New sequence name is the same as the old name: " + newName);
+            }
+            if (db.getSequenceNullable(newName) != null) {
+                throw new DdlException("Sequence already exists: " + newName);
+            }
+            synchronized (existing) {
+                Sequence renamed = existing.renamedCopy(newName);
+                Env.getCurrentEnv().getEditLog().logAlterSequence(SequencePersistInfo.create(renamed));
+                if (!db.replaceSequence(existing, renamed)) {
+                    throw new DdlException("Sequence changed concurrently: " + sequenceName);
+                }
+                return renamed;
+            }
+        } finally {
+            db.writeUnlock();
+        }
+    }
+
     public Sequence.AllocationResult allocateSequenceRange(long dbId, long sequenceId,
             long count, long expectedVersion) throws UserException {
         Database db = getDbOrMetaException(dbId);
-        Sequence sequence = db.getSequenceNullable(sequenceId);
-        if (sequence == null) {
-            throw new MetaNotFoundException("Unknown sequence id: " + sequenceId);
+        db.readLock();
+        try {
+            Sequence sequence = db.getSequenceNullable(sequenceId);
+            if (sequence == null) {
+                throw new MetaNotFoundException("Unknown sequence id: " + sequenceId);
+            }
+            return sequence.allocate(count, expectedVersion, (id, version, state) ->
+                    Env.getCurrentEnv().getEditLog().logUpdateSequenceState(
+                            SequencePersistInfo.state(dbId, id, version, state)));
+        } finally {
+            db.readUnlock();
         }
-        return sequence.allocate(count, expectedVersion, (id, version, state) ->
-                Env.getCurrentEnv().getEditLog().logUpdateSequenceState(
-                        SequencePersistInfo.state(dbId, id, version, state)));
     }
 
     public void replayCreateSequence(SequencePersistInfo info) throws MetaNotFoundException {

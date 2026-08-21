@@ -84,8 +84,8 @@ public class CreateSequenceCommand extends Command implements ForwardWithSync {
     private static long parseCache(String value) throws AnalysisException {
         try {
             long cache = Long.parseLong(value);
-            if (cache <= 0) {
-                throw new AnalysisException("CACHE must be positive, or use NOCACHE");
+            if (cache < 2) {
+                throw new AnalysisException("CACHE must be at least 2, or use NOCACHE");
             }
             return cache;
         } catch (NumberFormatException e) {
