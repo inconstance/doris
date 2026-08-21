@@ -155,6 +155,7 @@ public class PlanFragment extends TreeNode<PlanFragment> {
 
     // has colocate plan node
     protected boolean hasColocatePlanNode = false;
+    protected boolean hasSequencePlanNode = false;
     protected final Supplier<Boolean> hasBucketShuffleJoin;
 
     private TResultSinkType resultSinkType = TResultSinkType.MYSQL_PROTOCOL;
@@ -215,6 +216,9 @@ public class PlanFragment extends TreeNode<PlanFragment> {
             return;
         }
         node.setFragment(this);
+        if (node instanceof SequenceNode) {
+            hasSequencePlanNode = true;
+        }
         if (node instanceof ExchangeNode) {
             return;
         }
@@ -279,6 +283,14 @@ public class PlanFragment extends TreeNode<PlanFragment> {
 
     public boolean hasColocatePlanNode() {
         return hasColocatePlanNode;
+    }
+
+    public void setHasSequencePlanNode(boolean hasSequencePlanNode) {
+        this.hasSequencePlanNode = hasSequencePlanNode;
+    }
+
+    public boolean hasSequencePlanNode() {
+        return hasSequencePlanNode;
     }
 
     /**
@@ -456,6 +468,9 @@ public class PlanFragment extends TreeNode<PlanFragment> {
         newRoot.setChild(0, planRoot);
         planRoot = newRoot;
         planRoot.setFragment(this);
+        if (newRoot instanceof SequenceNode) {
+            hasSequencePlanNode = true;
+        }
     }
 
     public DataSink getSink() {

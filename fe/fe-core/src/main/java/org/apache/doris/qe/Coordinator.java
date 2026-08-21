@@ -184,6 +184,7 @@ public class Coordinator implements CoordInterface {
 
     // Random is used to shuffle instances of partitioned
     private static final Random instanceRandom = new SecureRandom();
+    private static final int SEQUENCE_CURRVAL_COMMIT_TIMEOUT_S = 5;
 
     public static ExecutorService backendRpcCallbackExecutor = ThreadPoolManager.newDaemonProfileThreadPool(
             32, 100, "backend-rpc-callback", true);
@@ -648,6 +649,10 @@ public class Coordinator implements CoordInterface {
 
 
     public TPipelineFragmentParams getStreamLoadPlan() throws Exception {
+        if (isSequenceQuery()) {
+            queryOptions.setIsReportSuccess(true);
+        }
+
         processFragmentAssignmentAndParams();
 
         // This is a load process.
@@ -744,6 +749,10 @@ public class Coordinator implements CoordInterface {
         if (LOG.isDebugEnabled() && !fragments.isEmpty()) {
             LOG.debug("debug: in Coordinator::exec. query id: {}, fragment: {}",
                     DebugUtil.printId(queryId), fragments.get(0).toThrift());
+        }
+
+        if (isSequenceQuery()) {
+            queryOptions.setIsReportSuccess(true);
         }
 
         processFragmentAssignmentAndParams();
@@ -2499,17 +2508,8 @@ public class Coordinator implements CoordInterface {
                         params.getBackendId(), status.toString());
                 updateStatus(status);
             }
-        } else if (params.isDone() && params.isSetSequenceUsages()) {
-            synchronized (pendingSequenceUsages) {
-                for (TSequenceUsage usage : params.getSequenceUsages()) {
-                    TSequenceUsage previous = pendingSequenceUsages.get(usage.getSequenceId());
-                    if (previous == null || usage.getAllocationTicket() > previous.getAllocationTicket()
-                            || (usage.getAllocationTicket() == previous.getAllocationTicket()
-                            && usage.getConsumedIndex() > previous.getConsumedIndex())) {
-                        pendingSequenceUsages.put(usage.getSequenceId(), usage);
-                    }
-                }
-            }
+        } else {
+            updateSequenceUsages(params);
         }
         if (params.isSetDeltaUrls() && deltaUrls != null) {
             updateDeltas(params.getDeltaUrls());
@@ -2562,9 +2562,37 @@ public class Coordinator implements CoordInterface {
         }
     }
 
+    private void updateSequenceUsages(TReportExecStatusParams params) {
+        if (!params.isDone() || !params.isSetSequenceUsages()) {
+            return;
+        }
+        synchronized (pendingSequenceUsages) {
+            for (TSequenceUsage usage : params.getSequenceUsages()) {
+                TSequenceUsage previous = pendingSequenceUsages.get(usage.getSequenceId());
+                if (previous == null || usage.getAllocationTicket() > previous.getAllocationTicket()
+                        || (usage.getAllocationTicket() == previous.getAllocationTicket()
+                        && usage.getConsumedIndex() > previous.getConsumedIndex())) {
+                    pendingSequenceUsages.put(usage.getSequenceId(), usage);
+                }
+            }
+        }
+    }
+
+    private boolean isSequenceQuery() {
+        return fragments.stream().anyMatch(PlanFragment::hasSequencePlanNode);
+    }
+
     @Override
     public void commitSequenceCurrvals() {
+        if (isSequenceQuery() && !isDone()) {
+            join(SEQUENCE_CURRVAL_COMMIT_TIMEOUT_S);
+        }
+
         synchronized (pendingSequenceUsages) {
+            if (!isDone() || !queryStatus.ok()) {
+                pendingSequenceUsages.clear();
+                return;
+            }
             for (TSequenceUsage usage : pendingSequenceUsages.values()) {
                 context.updateSequenceCurrval(usage.getSequenceId(),
                         new BigInteger(usage.getLastConsumedValue()), usage.getSequenceVersion(),
