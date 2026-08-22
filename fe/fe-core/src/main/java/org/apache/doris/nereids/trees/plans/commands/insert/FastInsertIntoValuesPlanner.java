@@ -29,10 +29,12 @@ import org.apache.doris.nereids.trees.plans.Plan;
 import org.apache.doris.nereids.trees.plans.logical.LogicalOlapTableSink;
 import org.apache.doris.nereids.trees.plans.logical.LogicalOneRowRelation;
 import org.apache.doris.nereids.trees.plans.logical.LogicalProject;
+import org.apache.doris.nereids.trees.plans.logical.LogicalSequence;
 import org.apache.doris.nereids.trees.plans.logical.LogicalUnion;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalOneRowRelation;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalPlan;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalProject;
+import org.apache.doris.nereids.trees.plans.physical.PhysicalSequence;
 import org.apache.doris.nereids.trees.plans.physical.PhysicalUnion;
 import org.apache.doris.nereids.trees.plans.visitor.DefaultPlanRewriter;
 
@@ -115,6 +117,17 @@ public class FastInsertIntoValuesPlanner extends NereidsPlanner {
                         logicalProject.getProjects(),
                         logicalProject.getLogicalProperties(),
                         logicalProject.child()
+                );
+            }
+
+            @Override
+            public Plan visitLogicalSequence(LogicalSequence<? extends Plan> logicalSequence, Void context) {
+                logicalSequence =
+                        (LogicalSequence<? extends Plan>) super.visitLogicalSequence(logicalSequence, context);
+                return new PhysicalSequence<>(
+                        logicalSequence.getSequenceAliases(),
+                        logicalSequence.getLogicalProperties(),
+                        logicalSequence.child()
                 );
             }
 

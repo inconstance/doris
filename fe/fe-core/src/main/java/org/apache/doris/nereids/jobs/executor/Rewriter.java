@@ -536,6 +536,11 @@ public class Rewriter extends AbstractBatchJobExecutor {
                         new NormalizeSort()
                 ),
 
+                // Sequence values belong to the final rows of each query block. Bind them only
+                // after aggregate/subquery/sort normalization has established that row shape.
+                topDown(new BindSequenceValue()),
+                custom(RuleType.CHECK_SEQUENCE_USAGE, CheckSequenceUsage::new),
+
                 topDown(// must behind NormalizeAggregate/NormalizeSort
                         new MergeProjectable(),
                         new PushDownEncodeSlot(),

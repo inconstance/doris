@@ -33,6 +33,7 @@
 #include <mutex>
 #include <shared_mutex>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -550,12 +551,23 @@ public:
 
     std::vector<TSequenceUsage> sequence_usages() const {
         std::lock_guard<std::mutex> lock(_sequence_usages_mutex);
-        return _sequence_usages;
+        std::vector<TSequenceUsage> usages;
+        usages.reserve(_sequence_usages.size());
+        for (const auto& entry : _sequence_usages) {
+            usages.emplace_back(entry.second);
+        }
+        return usages;
     }
 
     void add_sequence_usage(const TSequenceUsage& usage) {
         std::lock_guard<std::mutex> lock(_sequence_usages_mutex);
-        _sequence_usages.emplace_back(usage);
+        auto it = _sequence_usages.find(usage.sequence_id);
+        if (it == _sequence_usages.end() ||
+            usage.allocation_ticket > it->second.allocation_ticket ||
+            (usage.allocation_ticket == it->second.allocation_ticket &&
+             usage.consumed_index > it->second.consumed_index)) {
+            _sequence_usages[usage.sequence_id] = usage;
+        }
     }
 
     // local runtime filter mgr, the runtime filter do not have remote target or
@@ -969,7 +981,7 @@ private:
     mutable std::mutex _hive_partition_updates_mutex;
     std::vector<THivePartitionUpdate> _hive_partition_updates;
     mutable std::mutex _sequence_usages_mutex;
-    std::vector<TSequenceUsage> _sequence_usages;
+    std::unordered_map<int64_t, TSequenceUsage> _sequence_usages;
 
     mutable std::mutex _iceberg_commit_datas_mutex;
     std::vector<TIcebergCommitData> _iceberg_commit_datas;

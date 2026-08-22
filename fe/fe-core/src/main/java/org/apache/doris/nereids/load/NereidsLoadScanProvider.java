@@ -34,7 +34,6 @@ import org.apache.doris.common.UserException;
 import org.apache.doris.common.util.Util;
 import org.apache.doris.load.loadv2.LoadTask;
 import org.apache.doris.nereids.analyzer.UnboundFunction;
-import org.apache.doris.nereids.analyzer.UnboundSequenceValue;
 import org.apache.doris.nereids.analyzer.UnboundSlot;
 import org.apache.doris.nereids.trees.expressions.EqualTo;
 import org.apache.doris.nereids.trees.expressions.ExprId;
@@ -634,9 +633,10 @@ public class NereidsLoadScanProvider {
         return originExpr;
     }
 
-    private static Expression defaultExpression(Column column) {
+    private static Expression defaultExpression(Column column) throws AnalysisException {
         if (column.hasSequenceDefault()) {
-            return new UnboundSequenceValue(column.getDefaultSequenceNameParts(), true);
+            throw new AnalysisException(
+                    "Sequence NEXTVAL default is not supported as an implicit replace_value argument");
         }
         return NereidsLoadUtils.parseExpressionSeq(column.getDefaultValueSql()).get(0);
     }

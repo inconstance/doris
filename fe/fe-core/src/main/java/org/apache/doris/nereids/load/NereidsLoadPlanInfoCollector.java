@@ -55,6 +55,7 @@ import org.apache.doris.nereids.trees.expressions.Alias;
 import org.apache.doris.nereids.trees.expressions.Cast;
 import org.apache.doris.nereids.trees.expressions.Expression;
 import org.apache.doris.nereids.trees.expressions.NamedExpression;
+import org.apache.doris.nereids.trees.expressions.SequenceValue;
 import org.apache.doris.nereids.trees.expressions.Slot;
 import org.apache.doris.nereids.trees.expressions.SlotReference;
 import org.apache.doris.nereids.trees.expressions.literal.NullLiteral;
@@ -93,6 +94,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
 
@@ -271,6 +273,7 @@ public class NereidsLoadPlanInfoCollector extends DefaultPlanVisitor<Void, PlanT
                 logicalPlan, PhysicalProperties.ANY);
         PlanTranslatorContext context = new PlanTranslatorContext(cascadesContext, descTable);
         loadPlanInfo.destTuple = scanDescriptor;
+        loadPlanInfo.sequenceDefaultColumns = new HashSet<>();
         logicalPlan.accept(this, context);
         return loadPlanInfo;
     }
@@ -348,6 +351,22 @@ public class NereidsLoadPlanInfoCollector extends DefaultPlanVisitor<Void, PlanT
         for (int i = 0; i < slotDescriptorList.size(); ++i) {
             DataType targetType = DataType.fromCatalogType(slotDescriptorList.get(i).getType());
             Expression output = outputs.get(i);
+            if (output.containsType(SequenceValue.class)) {
+                Expression sequence = output;
+                while (sequence instanceof Alias || sequence instanceof Cast) {
+                    sequence = sequence.child(0);
+                }
+                if (!(sequence instanceof SequenceValue)) {
+                    throw new AnalysisException(
+                            "Sequence NEXTVAL default is not supported inside a load mapping expression");
+                }
+                Column column = slotDescriptorList.get(i).getColumn();
+                if (column == null) {
+                    throw new AnalysisException("Can not resolve the target column for Sequence NEXTVAL default");
+                }
+                loadPlanInfo.sequenceDefaultColumns.add(column.getName());
+                output = new NullLiteral(targetType);
+            }
             if (!(targetType.isJsonType() && output.getDataType().isStringLikeType())) {
                 if (output instanceof Alias) {
                     output = TypeCoercionUtils.castIfNotSameType(((Alias) output).child(), targetType);
@@ -442,7 +461,6 @@ public class NereidsLoadPlanInfoCollector extends DefaultPlanVisitor<Void, PlanT
         loadPlanInfo.srcTupleId = oneRowTuple.getId();
         loadPlanInfo.srcSlotIds = new ArrayList<>(oneRowTuple.getAllSlotIds());
         loadPlanInfo.srcSlotIdToDefaultValueMap = Maps.newHashMap();
-        loadPlanInfo.sequenceDefaultColumns = new HashSet<>();
         for (SlotDescriptor slotDescriptor : oneRowTuple.getSlots()) {
             Column column = destTable.getColumn(slotDescriptor.getColumn().getName());
             if (column != null) {
@@ -465,9 +483,6 @@ public class NereidsLoadPlanInfoCollector extends DefaultPlanVisitor<Void, PlanT
                 }
                 if (exprMap.containsKey(column.getName())) {
                     continue;
-                }
-                if (column.hasSequenceDefault()) {
-                    loadPlanInfo.sequenceDefaultColumns.add(column.getName());
                 }
                 Expr expr = null;
                 if (expression != null) {

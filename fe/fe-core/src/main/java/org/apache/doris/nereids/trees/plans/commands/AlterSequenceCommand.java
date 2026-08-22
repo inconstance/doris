@@ -77,8 +77,12 @@ public class AlterSequenceCommand extends Command implements ForwardWithSync {
         BigInteger maxValue = options.containsKey(CreateSequenceCommand.Option.NOMAXVALUE)
                 ? ascending ? Sequence.POSITIVE_DEFAULT_MAX : Sequence.NEGATIVE_DEFAULT_MAX
                 : decimalOption(CreateSequenceCommand.Option.MAXVALUE);
-        Long cacheSize = options.containsKey(CreateSequenceCommand.Option.NOCACHE) ? 0L
-                : longOption(CreateSequenceCommand.Option.CACHE);
+        Long cacheSize = null;
+        if (options.containsKey(CreateSequenceCommand.Option.NOCACHE)) {
+            cacheSize = 0L;
+        } else if (options.containsKey(CreateSequenceCommand.Option.CACHE)) {
+            cacheSize = longOption(CreateSequenceCommand.Option.CACHE);
+        }
         Boolean cycle = options.containsKey(CreateSequenceCommand.Option.CYCLE) ? Boolean.TRUE
                 : options.containsKey(CreateSequenceCommand.Option.NOCYCLE) ? Boolean.FALSE : null;
         Env.getCurrentInternalCatalog().alterSequence(db.getId(), resolvedName.sequenceName, increment,

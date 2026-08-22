@@ -29,6 +29,8 @@ import org.apache.doris.nereids.rules.expression.ExpressionRewrite;
 import org.apache.doris.nereids.rules.expression.ExpressionRewriteRule;
 import org.apache.doris.nereids.rules.expression.rules.ConvertAggStateCast;
 import org.apache.doris.nereids.rules.expression.rules.FoldConstantRuleOnFE;
+import org.apache.doris.nereids.rules.rewrite.BindSequenceValue;
+import org.apache.doris.nereids.rules.rewrite.CheckSequenceUsage;
 import org.apache.doris.nereids.rules.rewrite.MergeProjectable;
 import org.apache.doris.nereids.rules.rewrite.OneRewriteRuleFactory;
 import org.apache.doris.nereids.rules.rewrite.PushProjectIntoUnion;
@@ -51,7 +53,11 @@ public class InsertIntoValuesAnalyzer extends AbstractBatchJobExecutor {
             bottomUp(
                     new InlineTableToUnionOrOneRowRelation(),
                     new BindSink(),
-                    new MergeProjectable(),
+                    new MergeProjectable()
+            ),
+            topDown(new BindSequenceValue()),
+            custom(RuleType.CHECK_SEQUENCE_USAGE, CheckSequenceUsage::new),
+            bottomUp(
                     // after bind olap table sink, the LogicalProject will be generated under LogicalOlapTableSink,
                     // we should convert the agg state function in the project, and evaluate some env parameters
                     // like encrypt key reference, for example: `values (aes_encrypt("abc",key test.my_key))`,
@@ -67,7 +73,11 @@ public class InsertIntoValuesAnalyzer extends AbstractBatchJobExecutor {
             bottomUp(
                     new InlineTableToUnionOrOneRowRelation(),
                     new BindSink(),
-                    new MergeProjectable(),
+                    new MergeProjectable()
+            ),
+            topDown(new BindSequenceValue()),
+            custom(RuleType.CHECK_SEQUENCE_USAGE, CheckSequenceUsage::new),
+            bottomUp(
 
                     // the BatchInsertIntoTableCommand need send StringLiteral to backend,
                     // and only support alias(literal as xx) or alias(cast(literal as xx)),

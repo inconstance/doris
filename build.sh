@@ -189,7 +189,7 @@ PARAMETER_COUNT="$#"
 PARAMETER_FLAG=0
 DENABLE_CLANG_COVERAGE='OFF'
 BUILD_AZURE='ON'
-BUILD_UI=0
+BUILD_UI=1
 if [[ "$#" == 1 ]]; then
     # default
     BUILD_FE=1
@@ -357,21 +357,6 @@ update_submodule() {
     local submodule_path=$1
     local submodule_name=$2
     local archive_url=$3
-    local archive_commit_file="${DORIS_HOME}/${submodule_path}/.doris_archive_commit"
-    local current_submodule_commit_id
-    local expect_submodule_commit_id
-
-    expect_submodule_commit_id=$(git -C "${DORIS_HOME}" ls-tree HEAD "${submodule_path}" | awk '{print $3}')
-    if current_submodule_commit_id=$(git -C "${DORIS_HOME}/${submodule_path}" rev-parse HEAD 2>/dev/null) \
-            && [[ "${current_submodule_commit_id}" == "${expect_submodule_commit_id}" ]]; then
-        echo "Reuse ${submodule_name} submodule at commit ${expect_submodule_commit_id}"
-        return
-    fi
-    if [[ -n "${expect_submodule_commit_id}" && -f "${archive_commit_file}" ]] \
-            && [[ "$(<"${archive_commit_file}")" == "${expect_submodule_commit_id}" ]]; then
-        echo "Reuse ${submodule_name} archive at commit ${expect_submodule_commit_id}"
-        return
-    fi
 
     set +e
     cd "${DORIS_HOME}"
@@ -382,6 +367,7 @@ update_submodule() {
         cd "${submodule_path}"
         submodule_commit_id=$(git rev-parse HEAD)
         cd -
+        expect_submodule_commit_id=$(git ls-tree HEAD "${submodule_path}" | awk '{print $3}')
         echo "Current commit ID of ${submodule_name} submodule: ${submodule_commit_id}, expected is ${expect_submodule_commit_id}"
     fi
     set -e
@@ -400,7 +386,6 @@ update_submodule() {
 
         mkdir -p "${DORIS_HOME}/${submodule_path}"
         curl -L "${commit_specific_url}" | tar -xz -C "${DORIS_HOME}/${submodule_path}" --strip-components=1
-        echo "${submodule_commit}" >"${archive_commit_file}"
     fi
 }
 

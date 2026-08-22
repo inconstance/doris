@@ -59,7 +59,7 @@ public class DefaultValueExprDef implements GsonPostProcessable {
 
     public String getSql() {
         if (isSequenceNextVal()) {
-            throw new IllegalStateException("Sequence NEXTVAL default must be materialized by SequenceNode");
+            return String.join(".", sequenceNameParts) + ".NEXTVAL";
         }
         StringBuilder sb = new StringBuilder();
         sb.append(exprName);

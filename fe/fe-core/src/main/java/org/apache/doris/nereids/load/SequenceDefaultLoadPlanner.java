@@ -58,8 +58,11 @@ final class SequenceDefaultLoadPlanner {
 
         TupleDescriptor sequenceTuple = descriptorTable.createTupleDescriptor("SequenceDefaultTuple");
         Map<String, SlotDescriptor> sequenceSlots = Maps.newHashMap();
+        Map<Long, SlotDescriptor> slotsBySequenceId = Maps.newHashMap();
         List<TSequenceSpec> specs = Lists.newArrayList();
-        for (String columnName : sequenceDefaultColumns) {
+        List<String> sortedColumnNames = Lists.newArrayList(sequenceDefaultColumns);
+        sortedColumnNames.sort(String.CASE_INSENSITIVE_ORDER);
+        for (String columnName : sortedColumnNames) {
             Column column = table.getColumn(columnName);
             List<String> nameParts = column.getDefaultSequenceNameParts();
             String sequenceDbName = nameParts.size() == 2 ? nameParts.get(0) : db.getFullName();
@@ -70,14 +73,17 @@ final class SequenceDefaultLoadPlanner {
                 throw new AnalysisException("Sequence does not exist: " + String.join(".", nameParts));
             }
 
-            SlotDescriptor sequenceSlot = descriptorTable.addSlotDescriptor(sequenceTuple);
-            sequenceSlot.setType(Type.LARGEINT);
-            sequenceSlot.setLabel("__sequence_default_" + columnName);
-            sequenceSlot.setIsMaterialized(true);
-            sequenceSlot.setIsNullable(false);
+            SlotDescriptor sequenceSlot = slotsBySequenceId.get(sequence.getId());
+            if (sequenceSlot == null) {
+                sequenceSlot = descriptorTable.addSlotDescriptor(sequenceTuple);
+                sequenceSlot.setType(Type.LARGEINT);
+                sequenceSlot.setLabel("__sequence_default_" + columnName);
+                sequenceSlot.setIsNullable(false);
+                slotsBySequenceId.put(sequence.getId(), sequenceSlot);
+                specs.add(new TSequenceSpec(sequenceDb.getId(), sequence.getId(), sequence.getVersion(),
+                        sequenceSlot.getId().asInt(), true, sequence.getCacheSize()));
+            }
             sequenceSlots.put(columnName, sequenceSlot);
-            specs.add(new TSequenceSpec(sequenceDb.getId(), sequence.getId(), sequence.getVersion(),
-                    sequenceSlot.getId().asInt(), true, sequence.getCacheSize()));
         }
 
         SequenceNode sequenceNode = new SequenceNode(
@@ -87,7 +93,7 @@ final class SequenceDefaultLoadPlanner {
             SlotDescriptor sequenceSlot = sequenceSlots.get(outputSlot.getColumn().getName());
             projections.add(sequenceSlot == null
                     ? new SlotRef(outputSlot)
-                    : new CastExpr(outputSlot.getType(), new SlotRef(sequenceSlot)));
+                    : new CastExpr(outputSlot.getType(), new SlotRef(sequenceSlot), null));
         }
         sequenceNode.setProjectList(projections);
         sequenceNode.setOutputTupleDesc(scanTuple);
