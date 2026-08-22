@@ -2562,7 +2562,7 @@ public class Coordinator implements CoordInterface {
         }
     }
 
-    private void updateSequenceUsages(TReportExecStatusParams params) {
+    protected void updateSequenceUsages(TReportExecStatusParams params) {
         if (!params.isDone() || !params.isSetSequenceUsages()) {
             return;
         }
@@ -2578,7 +2578,7 @@ public class Coordinator implements CoordInterface {
         }
     }
 
-    private boolean isSequenceQuery() {
+    protected boolean isSequenceQuery() {
         return fragments.stream().anyMatch(PlanFragment::hasSequencePlanNode);
     }
 
@@ -2589,7 +2589,7 @@ public class Coordinator implements CoordInterface {
         }
 
         synchronized (pendingSequenceUsages) {
-            if (!isDone() || !queryStatus.ok()) {
+            if (!isDone() || !getExecStatus().ok()) {
                 pendingSequenceUsages.clear();
                 return;
             }

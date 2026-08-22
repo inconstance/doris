@@ -46,7 +46,9 @@ import org.apache.thrift.TException;
 
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 
 public class QueryProcessor extends AbstractJobProcessor {
     private static final Logger LOG = LogManager.getLogger(QueryProcessor.class);
@@ -58,6 +60,7 @@ public class QueryProcessor extends AbstractJobProcessor {
     private ResultReceiverConsumer receiverConsumer;
 
     private long numReceivedRows;
+    private volatile CountDownLatch fragmentReportsDone = new CountDownLatch(0);
 
     public QueryProcessor(CoordinatorContext coordinatorContext, ResultReceiverConsumer consumer) {
         super(coordinatorContext);
@@ -115,7 +118,27 @@ public class QueryProcessor extends AbstractJobProcessor {
 
     @Override
     protected void doProcessReportExecStatus(TReportExecStatusParams params, SingleFragmentPipelineTask fragmentTask) {
+        if (fragmentTask.processReportExecStatus(params)) {
+            fragmentReportsDone.countDown();
+        }
+    }
 
+    @Override
+    protected void afterSetPipelineExecutionTask(PipelineExecutionTask pipelineExecutionTask) {
+        fragmentReportsDone = new CountDownLatch(backendFragmentTasks.orElseThrow().size());
+    }
+
+    public boolean isDone() {
+        return fragmentReportsDone.getCount() == 0;
+    }
+
+    public boolean join(int timeoutS) {
+        try {
+            return fragmentReportsDone.await(timeoutS, TimeUnit.SECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
     }
 
     public boolean isEos() {

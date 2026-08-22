@@ -141,6 +141,10 @@ public class NereidsCoordinator extends Coordinator {
     public void exec() throws Exception {
         enqueue(coordinatorContext.connectContext);
 
+        if (isSequenceQuery()) {
+            coordinatorContext.queryOptions.setIsReportSuccess(true);
+        }
+
         processTopSink(coordinatorContext, coordinatorContext.topDistributedPlan);
 
         QeProcessorImpl.INSTANCE.registerInstances(coordinatorContext.queryId, coordinatorContext.instanceNum.get());
@@ -251,16 +255,25 @@ public class NereidsCoordinator extends Coordinator {
      */
     @Override
     public boolean join(int timeoutS) {
-        return coordinatorContext.asLoadProcessor().join(timeoutS);
+        JobProcessor jobProcessor = coordinatorContext.getJobProcessor();
+        if (jobProcessor instanceof LoadProcessor) {
+            return ((LoadProcessor) jobProcessor).join(timeoutS);
+        }
+        return ((QueryProcessor) jobProcessor).join(timeoutS);
     }
 
     @Override
     public boolean isDone() {
-        return coordinatorContext.asLoadProcessor().isDone();
+        JobProcessor jobProcessor = coordinatorContext.getJobProcessor();
+        if (jobProcessor instanceof LoadProcessor) {
+            return ((LoadProcessor) jobProcessor).isDone();
+        }
+        return ((QueryProcessor) jobProcessor).isDone();
     }
 
     @Override
     public void updateFragmentExecStatus(TReportExecStatusParams params) {
+        updateSequenceUsages(params);
         coordinatorContext.getJobProcessor().updateFragmentExecStatus(params);
     }
 
