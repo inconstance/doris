@@ -26,6 +26,8 @@ import org.apache.doris.plsql.Var;
 import org.apache.doris.plsql.exception.ArityException;
 import org.apache.doris.plsql.exception.TypeException;
 
+import java.math.BigDecimal;
+import java.util.Arrays;
 import java.util.List;
 
 public class MethodParams {
@@ -40,12 +42,42 @@ public class MethodParams {
         return at(nth, Long.class);
     }
 
+    public BigDecimal decimalAt(int nth) {
+        Var source = actual.get(nth);
+        if (source.isNull()) {
+            return null;
+        }
+        Var decimal = new Var(Var.Type.DECIMAL).cast(source);
+        if (decimal.value == null) {
+            throw new TypeException(null, BigDecimal.class, source.type, source.value);
+        }
+        return decimal.decimalValue();
+    }
+
+    public Integer integerAt(int nth) {
+        Var source = actual.get(nth);
+        try {
+            BigDecimal decimal = decimalAt(nth);
+            return decimal == null ? null : decimal.intValueExact();
+        } catch (ArithmeticException e) {
+            throw new TypeException(null, Integer.class, source.type, source.value);
+        }
+    }
+
+    public boolean isNullAt(int nth) {
+        return actual.get(nth).isNull();
+    }
+
     public Row rowAt(int nth) {
         return at(nth, Row.class);
     }
 
     public String stringAt(int nth) {
         return at(nth, String.class);
+    }
+
+    public byte[] rawAt(int nth) {
+        return at(nth, byte[].class);
     }
 
     public File fileAt(int nth) {
@@ -71,6 +103,15 @@ public class MethodParams {
             return (methodName, params) -> {
                 if (params.size() != count) {
                     throw new ArityException(null, methodName, count, params.size());
+                }
+            };
+        }
+
+        static Arity oneOf(int... counts) {
+            return (methodName, params) -> {
+                if (Arrays.stream(counts).noneMatch(count -> count == params.size())) {
+                    throw new ArityException(null, "wrong number of arguments in call to '" + methodName
+                            + "'. Expected one of " + Arrays.toString(counts) + " got " + params.size() + ".");
                 }
             };
         }

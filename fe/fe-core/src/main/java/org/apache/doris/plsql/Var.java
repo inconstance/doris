@@ -22,11 +22,13 @@ package org.apache.doris.plsql;
 
 import org.apache.doris.common.AnalysisException;
 import org.apache.doris.nereids.trees.expressions.literal.Literal;
+import org.apache.doris.nereids.trees.expressions.literal.VarBinaryLiteral;
 import org.apache.doris.plsql.exception.TypeException;
 import org.apache.doris.plsql.executor.QueryResult;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.nio.charset.StandardCharsets;
 import java.sql.Date;
 import java.sql.Timestamp;
 import java.util.ArrayList;
@@ -38,7 +40,7 @@ public class Var {
     // Data types
     public enum Type {
         BOOL, CURSOR, DATE, DECIMAL, DERIVED_TYPE, DERIVED_ROWTYPE, DOUBLE, FILE, IDENT, BIGINT, INTERVAL, ROW,
-        RS_LOCATOR, STRING, STRINGLIST, TIMESTAMP, NULL, PL_OBJECT
+        RAW, RS_LOCATOR, STRING, STRINGLIST, TIMESTAMP, NULL, PL_OBJECT
     }
 
     public static final String DERIVED_TYPE = "DERIVED%TYPE";
@@ -85,6 +87,11 @@ public class Var {
 
     public Var(String value) {
         this.type = Type.STRING;
+        this.value = value;
+    }
+
+    public Var(byte[] value) {
+        this.type = Type.RAW;
         this.value = value;
     }
 
@@ -218,6 +225,8 @@ public class Var {
     public Literal toLiteral() {
         if (value instanceof Literal) {
             return (Literal) value;
+        } else if (type == Type.RAW) {
+            return new VarBinaryLiteral((byte[]) value);
         } else {
             return Literal.of(value);
         }
@@ -276,6 +285,9 @@ public class Var {
             int type = queryResult.jdbcType(idx);
             if (type == java.sql.Types.CHAR || type == java.sql.Types.VARCHAR) {
                 cast(new Var(queryResult.column(idx, String.class)));
+            } else if (type == java.sql.Types.BINARY || type == java.sql.Types.VARBINARY
+                    || type == java.sql.Types.LONGVARBINARY || type == java.sql.Types.BLOB) {
+                cast(new Var(queryResult.column(idx, byte[].class)));
             } else if (type == java.sql.Types.INTEGER || type == java.sql.Types.BIGINT
                     || type == java.sql.Types.SMALLINT || type == java.sql.Types.TINYINT) {
                 cast(new Var(queryResult.column(idx, Long.class)));
@@ -337,7 +349,8 @@ public class Var {
         } else if (type.equalsIgnoreCase("CHAR") || type.equalsIgnoreCase("VARCHAR") || type.equalsIgnoreCase(
                 "VARCHAR2")
                 || type.equalsIgnoreCase("STRING") || type.equalsIgnoreCase("XML")
-                || type.equalsIgnoreCase("CHARACTER")) {
+                || type.equalsIgnoreCase("CHARACTER") || type.equalsIgnoreCase("CLOB")
+                || type.equalsIgnoreCase("NCLOB")) {
             return Type.STRING;
         } else if (type.equalsIgnoreCase("DEC") || type.equalsIgnoreCase("DECIMAL") || type.equalsIgnoreCase("NUMERIC")
                 ||
@@ -358,6 +371,9 @@ public class Var {
             return Type.CURSOR;
         } else if (type.equalsIgnoreCase("UTL_FILE.FILE_TYPE")) {
             return Type.FILE;
+        } else if (type.equalsIgnoreCase("RAW") || type.equalsIgnoreCase("LONG RAW")
+                || type.equalsIgnoreCase("BLOB")) {
+            return Type.RAW;
         } else if (type.toUpperCase().startsWith("RESULT_SET_LOCATOR")) {
             return Type.RS_LOCATOR;
         } else if (type.equalsIgnoreCase(Var.DERIVED_TYPE)) {
@@ -376,6 +392,9 @@ public class Var {
     public static Type defineType(int type) {
         if (type == java.sql.Types.CHAR || type == java.sql.Types.VARCHAR) {
             return Type.STRING;
+        } else if (type == java.sql.Types.BINARY || type == java.sql.Types.VARBINARY
+                || type == java.sql.Types.LONGVARBINARY || type == java.sql.Types.BLOB) {
+            return Type.RAW;
         } else if (type == java.sql.Types.INTEGER || type == java.sql.Types.BIGINT) {
             return Type.BIGINT;
         }
@@ -590,6 +609,8 @@ public class Var {
             return ((Long) value).toString();
         } else if (type == Type.STRING) {
             return (String) value;
+        } else if (type == Type.RAW) {
+            return new String((byte[]) value, StandardCharsets.ISO_8859_1);
         } else if (type == Type.DATE) {
             return ((Date) value).toString();
         } else if (type == Type.TIMESTAMP) {

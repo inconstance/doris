@@ -42,6 +42,7 @@ public class FunctionString extends BuiltinFunctions {
         f.map.put("LENGTH", this::length);
         f.map.put("LOWER", this::lower);
         f.map.put("REPLACE", this::replace);
+        f.map.put("RPAD", this::rpad);
         f.map.put("SUBSTR", this::substr);
         f.map.put("SUBSTRING", this::substr);
         f.map.put("TO_CHAR", this::toChar);
@@ -49,6 +50,26 @@ public class FunctionString extends BuiltinFunctions {
 
         f.specMap.put("SUBSTRING", this::substring);
         f.specMap.put("TRIM", this::trim);
+    }
+
+    private void rpad(Expr_func_paramsContext ctx) {
+        if (ctx == null || ctx.func_param().size() < 2 || ctx.func_param().size() > 3) {
+            evalNull();
+            return;
+        }
+        String source = evalPop(ctx.func_param(0).expr()).toString();
+        int length = evalPop(ctx.func_param(1).expr()).intValue();
+        String padding = ctx.func_param().size() == 3
+                ? evalPop(ctx.func_param(2).expr()).toString() : " ";
+        if (source == null || padding == null || padding.isEmpty() || length < 0) {
+            evalNull();
+            return;
+        }
+        StringBuilder result = new StringBuilder(source);
+        while (result.length() < length) {
+            result.append(padding);
+        }
+        evalString(result.substring(0, length));
     }
 
     /**

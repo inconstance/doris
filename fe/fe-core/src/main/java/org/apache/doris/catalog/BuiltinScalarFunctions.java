@@ -182,6 +182,11 @@ import org.apache.doris.nereids.trees.expressions.functions.scalar.DaySecond;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.DaysAdd;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.DaysDiff;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.DaysSub;
+import org.apache.doris.nereids.trees.expressions.functions.scalar.DbmsLobGetLength;
+import org.apache.doris.nereids.trees.expressions.functions.scalar.DbmsLobSubstr;
+import org.apache.doris.nereids.trees.expressions.functions.scalar.DbmsRandomInteger;
+import org.apache.doris.nereids.trees.expressions.functions.scalar.DbmsRandomString;
+import org.apache.doris.nereids.trees.expressions.functions.scalar.DbmsRandomValue;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.Dceil;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.DecodeAsVarchar;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.DeduplicateMap;
@@ -198,6 +203,7 @@ import org.apache.doris.nereids.trees.expressions.functions.scalar.Dpow;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.Dround;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.Dsqrt;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.E;
+import org.apache.doris.nereids.trees.expressions.functions.scalar.EmptyClob;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.ElementAt;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.Elt;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.EncodeAsBigInt;
@@ -416,6 +422,7 @@ import org.apache.doris.nereids.trees.expressions.functions.scalar.QuartersDiff;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.QuartersSub;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.Quote;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.Radians;
+import org.apache.doris.nereids.trees.expressions.functions.scalar.RawToHex;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.Random;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.RandomBytes;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.RegexpCount;
@@ -519,6 +526,7 @@ import org.apache.doris.nereids.trees.expressions.functions.scalar.ToBase64Binar
 import org.apache.doris.nereids.trees.expressions.functions.scalar.ToBinary;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.ToBitmap;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.ToBitmapWithCheck;
+import org.apache.doris.nereids.trees.expressions.functions.scalar.ToBlob;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.ToDate;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.ToDateV2;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.ToDays;
@@ -552,6 +560,9 @@ import org.apache.doris.nereids.trees.expressions.functions.scalar.User;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.UtcDate;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.UtcTime;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.UtcTimestamp;
+import org.apache.doris.nereids.trees.expressions.functions.scalar.UtlRawCastToRaw;
+import org.apache.doris.nereids.trees.expressions.functions.scalar.UtlRawCastToVarchar2;
+import org.apache.doris.nereids.trees.expressions.functions.scalar.UtlRawConvert;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.Uuid;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.UuidNumeric;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.UuidtoInt;
@@ -751,6 +762,11 @@ public class BuiltinScalarFunctions implements FunctionHelper {
             scalar(DaysAdd.class, "days_add", "date_add", "adddate"),
             scalar(DaysDiff.class, "days_diff"),
             scalar(DaysSub.class, "days_sub", "date_sub", "subdate"),
+            scalar(DbmsLobGetLength.class, "dbms_lob_getlength"),
+            scalar(DbmsLobSubstr.class, "dbms_lob_substr"),
+            scalar(DbmsRandomInteger.class, "dbms_random_random"),
+            scalar(DbmsRandomString.class, "dbms_random_string"),
+            scalar(DbmsRandomValue.class, "dbms_random_value"),
             scalar(Dceil.class, "dceil"),
             scalar(DecodeAsVarchar.class, "decode_as_varchar"),
             scalar(DeduplicateMap.class, "deduplicate_map"),
@@ -767,6 +783,7 @@ public class BuiltinScalarFunctions implements FunctionHelper {
             scalar(Dround.class, "dround"),
             scalar(Dsqrt.class, "dsqrt"),
             scalar(E.class, "e"),
+            scalar(EmptyClob.class, "empty_clob"),
             // struct_element was merged into element_at in #64027; keep it as an alias
             scalar(ElementAt.class, "element_at", "struct_element"),
             scalar(Elt.class, "elt"),
@@ -991,6 +1008,7 @@ public class BuiltinScalarFunctions implements FunctionHelper {
             scalar(Quote.class, "quote"),
             scalar(Search.class, "search"),
             scalar(Radians.class, "radians"),
+            scalar(RawToHex.class, "rawtohex"),
             scalar(Random.class, "rand", "random"),
             scalar(Regexp.class, "regexp"),
             scalar(RegexpCount.class, "regexp_count"),
@@ -1101,6 +1119,7 @@ public class BuiltinScalarFunctions implements FunctionHelper {
             scalar(ToBinary.class, "to_binary", "to_hex"),
             scalar(ToBitmap.class, "to_bitmap"),
             scalar(ToBitmapWithCheck.class, "to_bitmap_with_check"),
+            scalar(ToBlob.class, "to_blob"),
             scalar(ToDate.class, "to_date"),
             scalar(ToDateV2.class, "to_datev2"),
             scalar(ToDays.class, "to_days"),
@@ -1134,6 +1153,9 @@ public class BuiltinScalarFunctions implements FunctionHelper {
             scalar(UtcDate.class, "utc_date"),
             scalar(UtcTime.class, "utc_time"),
             scalar(UtcTimestamp.class, "utc_timestamp"),
+            scalar(UtlRawCastToRaw.class, "utl_raw_cast_to_raw"),
+            scalar(UtlRawCastToVarchar2.class, "utl_raw_cast_to_varchar2"),
+            scalar(UtlRawConvert.class, "utl_raw_convert"),
             scalar(Uuid.class, "uuid"),
             scalar(UuidNumeric.class, "uuid_numeric"),
             scalar(UuidtoInt.class, "uuid_to_int"),

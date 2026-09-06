@@ -129,6 +129,7 @@ import org.apache.doris.nereids.DorisParser.ArithmeticUnaryContext;
 import org.apache.doris.nereids.DorisParser.ArrayLiteralContext;
 import org.apache.doris.nereids.DorisParser.ArraySliceContext;
 import org.apache.doris.nereids.DorisParser.BaseTableRefContext;
+import org.apache.doris.nereids.DorisParser.BeginEndBlockContext;
 import org.apache.doris.nereids.DorisParser.BooleanExpressionContext;
 import org.apache.doris.nereids.DorisParser.BooleanLiteralContext;
 import org.apache.doris.nereids.DorisParser.BracketRelationHintContext;
@@ -171,6 +172,7 @@ import org.apache.doris.nereids.DorisParser.CreateTableContext;
 import org.apache.doris.nereids.DorisParser.CreateTableLikeContext;
 import org.apache.doris.nereids.DorisParser.CreateUserContext;
 import org.apache.doris.nereids.DorisParser.CreateUserDefineFunctionContext;
+import org.apache.doris.nereids.DorisParser.DeclareStatementContext;
 import org.apache.doris.nereids.DorisParser.CreateViewContext;
 import org.apache.doris.nereids.DorisParser.CreateWorkloadGroupContext;
 import org.apache.doris.nereids.DorisParser.CreateWorkloadPolicyContext;
@@ -578,6 +580,7 @@ import org.apache.doris.nereids.trees.expressions.WhenClause;
 import org.apache.doris.nereids.trees.expressions.WindowExpression;
 import org.apache.doris.nereids.trees.expressions.WindowFrame;
 import org.apache.doris.nereids.trees.expressions.functions.Function;
+import org.apache.doris.nereids.trees.expressions.functions.OracleSystemFunctionRegistry;
 import org.apache.doris.nereids.trees.expressions.functions.agg.Count;
 import org.apache.doris.nereids.trees.expressions.functions.generator.Unnest;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.Array;
@@ -776,6 +779,7 @@ import org.apache.doris.nereids.trees.plans.commands.LoadCommand;
 import org.apache.doris.nereids.trees.plans.commands.LockTablesCommand;
 import org.apache.doris.nereids.trees.plans.commands.PauseJobCommand;
 import org.apache.doris.nereids.trees.plans.commands.PauseMTMVCommand;
+import org.apache.doris.nereids.trees.plans.commands.PlSqlBlockCommand;
 import org.apache.doris.nereids.trees.plans.commands.RecoverDatabaseCommand;
 import org.apache.doris.nereids.trees.plans.commands.RecoverPartitionCommand;
 import org.apache.doris.nereids.trees.plans.commands.RecoverTableCommand;
@@ -1198,7 +1202,8 @@ public class LogicalPlanBuilder extends DorisParserBaseVisitor<Object> {
 
     @Override
     public LogicalPlan visitSingleStatement(SingleStatementContext ctx) {
-        return ParserUtils.withOrigin(ctx, () -> (LogicalPlan) visit(ctx.statement()));
+        return ParserUtils.withOrigin(ctx, () -> (LogicalPlan) visit(
+                ctx.plsqlStatement() != null ? ctx.plsqlStatement() : ctx.statement()));
     }
 
     @Override
@@ -2204,6 +2209,17 @@ public class LogicalPlanBuilder extends DorisParserBaseVisitor<Object> {
     @Override
     public List<Pair<LogicalPlan, StatementContext>> visitMultiStatements(MultiStatementsContext ctx) {
         List<Pair<LogicalPlan, StatementContext>> logicalPlans = Lists.newArrayList();
+        if (ctx.plsqlStatement() != null) {
+            StatementContext statementContext = new StatementContext();
+            ConnectContext connectContext = ConnectContext.get();
+            if (connectContext != null) {
+                connectContext.setStatementContext(statementContext);
+                statementContext.setConnectContext(connectContext);
+            }
+            logicalPlans.add(Pair.of(ParserUtils.withOrigin(ctx,
+                    () -> (LogicalPlan) visit(ctx.plsqlStatement())), statementContext));
+            return logicalPlans;
+        }
         for (DorisParser.StatementContext statement : ctx.statement()) {
             StatementContext statementContext = new StatementContext();
             ConnectContext connectContext = ConnectContext.get();
@@ -3479,6 +3495,13 @@ public class LogicalPlanBuilder extends DorisParserBaseVisitor<Object> {
             params.addAll(visit(ctx.funcExpression(), Expression.class));
             List<OrderKey> orderKeys = visit(ctx.sortItem(), OrderKey.class);
             params.addAll(orderKeys.stream().map(OrderExpression::new).collect(Collectors.toList()));
+            Optional<String> oracleFunctionName = OracleSystemFunctionRegistry.resolve(dbName, functionName);
+            if (oracleFunctionName.isPresent()) {
+                if (isDistinct || ctx.windowSpec() != null || !orderKeys.isEmpty()) {
+                    throw new ParseException(dbName + "." + functionName
+                            + " does not support DISTINCT, ORDER BY, or OVER", ctx);
+                }
+            }
             return processUnboundFunction(ctx, dbName, functionName, isDistinct, params,
                     ctx.windowSpec(), ctx.identifier());
         });
@@ -3655,6 +3678,11 @@ public class LogicalPlanBuilder extends DorisParserBaseVisitor<Object> {
     @Override
     public Expression visitDereference(DereferenceContext ctx) {
         return ParserUtils.withOrigin(ctx, () -> {
+            Optional<String> oracleFunctionName = OracleSystemFunctionRegistry.resolveBareAccess(
+                    ctx.base.getText(), ctx.fieldName.getText());
+            if (oracleFunctionName.isPresent()) {
+                return new UnboundFunction(ctx.base.getText(), ctx.fieldName.getText(), ImmutableList.of());
+            }
             Expression e = getExpression(ctx.base);
             if (e instanceof UnboundSlot) {
                 UnboundSlot unboundAttribute = (UnboundSlot) e;
@@ -5471,6 +5499,16 @@ public class LogicalPlanBuilder extends DorisParserBaseVisitor<Object> {
                     ctx.REPLACE() != null);
             return createProcedurePlan;
         });
+    }
+
+    @Override
+    public LogicalPlan visitDeclareStatement(DeclareStatementContext ctx) {
+        return new PlSqlBlockCommand(getOriginSql(ctx));
+    }
+
+    @Override
+    public LogicalPlan visitBeginEndBlock(BeginEndBlockContext ctx) {
+        return new PlSqlBlockCommand(getOriginSql(ctx));
     }
 
     @Override

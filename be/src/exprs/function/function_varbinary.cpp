@@ -258,6 +258,7 @@ void register_function_binary(SimpleFunctionFactory& factory) {
     factory.register_function<FunctionToBinary>();
     factory.register_function<FunctionFromBinary>();
     factory.register_alias("from_binary", "from_hex");
+    factory.register_alias("from_binary", "rawtohex");
     factory.register_alias("to_binary", "to_hex");
 }
 

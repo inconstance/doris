@@ -28,6 +28,7 @@ import org.apache.doris.nereids.trees.expressions.functions.BoundFunction;
 import org.apache.doris.nereids.trees.expressions.functions.BuiltinFunctionBuilder;
 import org.apache.doris.nereids.trees.expressions.functions.ExplicitlyCastableSignature;
 import org.apache.doris.nereids.trees.expressions.functions.FunctionBuilder;
+import org.apache.doris.nereids.trees.expressions.functions.OracleSystemFunctionRegistry;
 import org.apache.doris.nereids.trees.expressions.functions.udf.JavaUdafBuilder;
 import org.apache.doris.nereids.trees.expressions.functions.udf.JavaUdfBuilder;
 import org.apache.doris.nereids.trees.expressions.functions.udf.JavaUdtfBuilder;
@@ -135,11 +136,18 @@ public class FunctionRegistry {
         List<FunctionBuilder> functionBuilders = null;
         int arity = arguments.size();
         String qualifiedName = StringUtils.isEmpty(dbName) ? name : dbName + "." + name;
+        Optional<String> oracleBuiltinName = OracleSystemFunctionRegistry.resolve(dbName, name);
+        if (oracleBuiltinName.isPresent()) {
+            dbName = null;
+            name = oracleBuiltinName.get();
+        }
 
         boolean preferUdfOverBuiltin = ConnectContext.get() == null ? false
                 : ConnectContext.get().getSessionVariable().preferUdfOverBuiltin;
 
-        if (preferUdfOverBuiltin) {
+        if (oracleBuiltinName.isPresent()) {
+            functionBuilders = findBuiltinFunctionBuilder(name, arguments);
+        } else if (preferUdfOverBuiltin) {
             // find udf first, then find builtin function
             functionBuilders = findUdfBuilder(dbName, name);
             if (CollectionUtils.isEmpty(functionBuilders) && StringUtils.isEmpty(dbName)) {

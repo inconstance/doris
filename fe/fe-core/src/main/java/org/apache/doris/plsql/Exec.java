@@ -127,7 +127,13 @@ import org.apache.doris.plsql.functions.InMemoryFunctionRegistry;
 import org.apache.doris.plsql.metastore.PlsqlMetaClient;
 import org.apache.doris.plsql.objects.DbmOutput;
 import org.apache.doris.plsql.objects.DbmOutputClass;
-import org.apache.doris.plsql.objects.Method;
+import org.apache.doris.plsql.objects.DbmsLob;
+import org.apache.doris.plsql.objects.DbmsLobClass;
+import org.apache.doris.plsql.objects.DbmsObfuscationToolkit;
+import org.apache.doris.plsql.objects.DbmsObfuscationToolkitClass;
+import org.apache.doris.plsql.objects.DbmsRandom;
+import org.apache.doris.plsql.objects.DbmsRandomClass;
+import org.apache.doris.plsql.objects.MethodArgument;
 import org.apache.doris.plsql.objects.MethodDictionary;
 import org.apache.doris.plsql.objects.MethodParams;
 import org.apache.doris.plsql.objects.PlObject;
@@ -135,6 +141,8 @@ import org.apache.doris.plsql.objects.Table;
 import org.apache.doris.plsql.objects.TableClass;
 import org.apache.doris.plsql.objects.UtlFile;
 import org.apache.doris.plsql.objects.UtlFileClass;
+import org.apache.doris.plsql.objects.UtlRaw;
+import org.apache.doris.plsql.objects.UtlRawClass;
 import org.apache.doris.plsql.packages.DorisPackageRegistry;
 import org.apache.doris.plsql.packages.InMemoryPackageRegistry;
 import org.apache.doris.plsql.packages.PackageRegistry;
@@ -966,6 +974,30 @@ public class Exec extends org.apache.doris.nereids.PLParserBaseVisitor<Integer> 
         utlFileVar.setValue(utlFile);
         utlFileVar.setConstant(true);
         addVariable(utlFileVar);
+
+        Var dbmsLobVar = new Var(Type.PL_OBJECT, "DBMS_LOB");
+        DbmsLob dbmsLob = DbmsLobClass.INSTANCE.newInstance();
+        dbmsLobVar.setValue(dbmsLob);
+        dbmsLobVar.setConstant(true);
+        addVariable(dbmsLobVar);
+
+        Var obfuscationVar = new Var(Type.PL_OBJECT, "DBMS_OBFUSCATION_TOOLKIT");
+        DbmsObfuscationToolkit obfuscationToolkit = DbmsObfuscationToolkitClass.INSTANCE.newInstance();
+        obfuscationVar.setValue(obfuscationToolkit);
+        obfuscationVar.setConstant(true);
+        addVariable(obfuscationVar);
+
+        Var dbmsRandomVar = new Var(Type.PL_OBJECT, "DBMS_RANDOM");
+        DbmsRandom dbmsRandom = DbmsRandomClass.INSTANCE.newInstance();
+        dbmsRandomVar.setValue(dbmsRandom);
+        dbmsRandomVar.setConstant(true);
+        addVariable(dbmsRandomVar);
+
+        Var utlRawVar = new Var(Type.PL_OBJECT, "UTL_RAW");
+        UtlRaw utlRaw = UtlRawClass.INSTANCE.newInstance();
+        utlRawVar.setValue(utlRaw);
+        utlRawVar.setConstant(true);
+        addVariable(utlRawVar);
     }
 
     private PLParser newParser(CommonTokenStream tokens) {
@@ -1657,15 +1689,27 @@ public class Exec extends org.apache.doris.nereids.PLParserBaseVisitor<Integer> 
 
     private Var dispatch(ParserRuleContext ctx, PlObject obj, String methodName,
             Expr_func_paramsContext paramCtx) {
-        List<Var> params = paramCtx == null
-                ? Collections.emptyList()
-                : paramCtx.func_param().stream().map(this::evalPop).collect(Collectors.toList());
-        return dispatch(ctx, obj, methodName, params);
+        List<MethodArgument> arguments = paramCtx == null ? Collections.emptyList()
+                : paramCtx.func_param().stream().map(param -> {
+                    String name = param.ident_pl() == null ? null : param.ident_pl().getText();
+                    String targetName = param.expr().expr_atom() != null
+                            && param.expr().expr_atom().qident() != null
+                            ? param.expr().expr_atom().qident().getText() : null;
+                    return new MethodArgument(name, targetName, evalPop(param.expr()));
+                }).collect(Collectors.toList());
+        Var result = obj.plClass().methodDictionary().invoke(ctx, obj, methodName, arguments);
+        for (MethodArgument argument : arguments) {
+            if (argument.output() != null) {
+                setVariable(argument.targetName(), argument.output());
+            }
+        }
+        return result;
     }
 
     private Var dispatch(ParserRuleContext ctx, PlObject obj, String methodName, List<Var> params) {
-        Method method = obj.plClass().methodDictionary().get(ctx, methodName);
-        return method.call(obj, params);
+        List<MethodArgument> arguments = params.stream()
+                .map(param -> new MethodArgument(null, null, param)).collect(Collectors.toList());
+        return obj.plClass().methodDictionary().invoke(ctx, obj, methodName, arguments);
     }
 
     /**

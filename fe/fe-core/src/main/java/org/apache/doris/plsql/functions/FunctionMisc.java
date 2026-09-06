@@ -26,10 +26,16 @@ import org.apache.doris.nereids.PLParser.Expr_spec_funcContext;
 import org.apache.doris.plsql.Conn;
 import org.apache.doris.plsql.Exec;
 import org.apache.doris.plsql.Var;
+import org.apache.doris.plsql.exception.ArityException;
 import org.apache.doris.plsql.exception.QueryException;
+import org.apache.doris.plsql.exception.TypeException;
 import org.apache.doris.plsql.executor.QueryExecutor;
 import org.apache.doris.plsql.executor.QueryResult;
 
+import com.google.common.io.BaseEncoding;
+
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
@@ -44,12 +50,19 @@ public class FunctionMisc extends BuiltinFunctions {
      */
     @Override
     public void register(BuiltinFunctions f) {
+        f.map.put("CEIL", this::ceil);
         f.map.put("COALESCE", this::nvl);
+        f.map.put("CHR", this::chr);
         f.map.put("DECODE", this::decode);
+        f.map.put("EMPTY_CLOB", this::emptyClob);
+        f.map.put("MOD", this::modulo);
         f.map.put("NVL", this::nvl);
         f.map.put("NVL2", this::nvl2);
         f.map.put("PART_COUNT_BY", this::partCountBy);
-        f.map.put("MOD", this::modulo);
+        f.map.put("RAWTOHEX", this::rawToHex);
+        f.map.put("RTRIM", this::rtrim);
+        f.map.put("TO_BLOB", this::toBlob);
+        f.map.put("TRUNC", this::trunc);
 
         f.specMap.put("ACTIVITY_COUNT", this::activityCount);
         f.specMap.put("CAST", this::cast);
@@ -59,6 +72,87 @@ public class FunctionMisc extends BuiltinFunctions {
         f.specMap.put("USER", this::currentUser);
 
         f.specSqlMap.put("CURRENT", this::currentSql);
+    }
+
+    private void ceil(Expr_func_paramsContext ctx) {
+        if (ctx == null || ctx.func_param().size() != 1) {
+            throw new ArityException(ctx, "CEIL", 1, ctx == null ? 0 : ctx.func_param().size());
+        }
+        Var value = evalPop(ctx.func_param(0).expr());
+        BigDecimal decimal = new Var(Var.Type.DECIMAL).cast(value).decimalValue();
+        evalVar(new Var(decimal.setScale(0, RoundingMode.CEILING)));
+    }
+
+    private void trunc(Expr_func_paramsContext ctx) {
+        if (ctx == null || ctx.func_param().size() != 1) {
+            throw new ArityException(ctx, "TRUNC", 1, ctx == null ? 0 : ctx.func_param().size());
+        }
+        Var value = evalPop(ctx.func_param(0).expr());
+        BigDecimal decimal = new Var(Var.Type.DECIMAL).cast(value).decimalValue();
+        evalVar(new Var(decimal.setScale(0, RoundingMode.DOWN)));
+    }
+
+    private void chr(Expr_func_paramsContext ctx) {
+        if (ctx == null || ctx.func_param().size() != 1) {
+            throw new ArityException(ctx, "CHR", 1, ctx == null ? 0 : ctx.func_param().size());
+        }
+        evalVar(new Var(String.valueOf((char) evalPop(ctx.func_param(0).expr()).intValue())));
+    }
+
+    private void rawToHex(Expr_func_paramsContext ctx) {
+        if (ctx == null || ctx.func_param().size() != 1) {
+            throw new ArityException(ctx, "RAWTOHEX", 1, ctx == null ? 0 : ctx.func_param().size());
+        }
+        Var value = evalPop(ctx.func_param(0).expr());
+        if (value.isNull()) {
+            evalVar(new Var(Var.Type.STRING));
+        } else if (value.type == Var.Type.RAW) {
+            evalVar(new Var(BaseEncoding.base16().encode((byte[]) value.value)));
+        } else {
+            throw new TypeException(ctx, Var.Type.RAW, value.type, value.value);
+        }
+    }
+
+    private void rtrim(Expr_func_paramsContext ctx) {
+        int count = ctx == null ? 0 : ctx.func_param().size();
+        if (count < 1 || count > 2) {
+            throw new ArityException(ctx, "wrong number of arguments in call to 'RTRIM'");
+        }
+        Var source = evalPop(ctx.func_param(0).expr());
+        if (source.isNull()) {
+            evalVar(new Var(Var.Type.STRING));
+            return;
+        }
+        String value = source.toString();
+        String characters = count == 2 ? evalPop(ctx.func_param(1).expr()).toString() : " ";
+        int end = value.length();
+        while (end > 0 && characters.indexOf(value.charAt(end - 1)) >= 0) {
+            end--;
+        }
+        evalVar(new Var(value.substring(0, end)));
+    }
+
+    private void emptyClob(Expr_func_paramsContext ctx) {
+        int count = ctx == null ? 0 : ctx.func_param().size();
+        if (count != 0) {
+            throw new ArityException(ctx, "EMPTY_CLOB", 0, count);
+        }
+        evalVar(new Var(""));
+    }
+
+    private void toBlob(Expr_func_paramsContext ctx) {
+        int count = ctx == null ? 0 : ctx.func_param().size();
+        if (count != 1) {
+            throw new ArityException(ctx, "TO_BLOB", 1, count);
+        }
+        Var value = evalPop(ctx.func_param(0).expr());
+        if (value.isNull()) {
+            evalVar(new Var(Var.Type.RAW));
+        } else if (value.type == Var.Type.RAW) {
+            evalVar(new Var((byte[]) value.value));
+        } else {
+            throw new TypeException(ctx, Var.Type.RAW, value.type, value.value);
+        }
     }
 
     /**

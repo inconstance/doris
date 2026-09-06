@@ -26,10 +26,16 @@ import org.apache.doris.nereids.trees.expressions.functions.BuiltinFunctionBuild
 import org.apache.doris.nereids.trees.expressions.functions.ExplicitlyCastableSignature;
 import org.apache.doris.nereids.trees.expressions.functions.FunctionBuilder;
 import org.apache.doris.nereids.trees.expressions.functions.PropagateNullable;
+import org.apache.doris.nereids.trees.expressions.functions.scalar.DbmsLobGetLength;
+import org.apache.doris.nereids.trees.expressions.functions.scalar.DbmsLobSubstr;
+import org.apache.doris.nereids.trees.expressions.functions.scalar.DbmsRandomInteger;
+import org.apache.doris.nereids.trees.expressions.functions.scalar.DbmsRandomString;
+import org.apache.doris.nereids.trees.expressions.functions.scalar.DbmsRandomValue;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.ScalarFunction;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.Substring;
 import org.apache.doris.nereids.trees.expressions.functions.scalar.Year;
 import org.apache.doris.nereids.trees.expressions.literal.Literal;
+import org.apache.doris.nereids.trees.expressions.literal.VarBinaryLiteral;
 import org.apache.doris.nereids.trees.expressions.shape.UnaryExpression;
 import org.apache.doris.nereids.types.IntegerType;
 import org.apache.doris.nereids.util.MemoPatternMatchSupported;
@@ -124,6 +130,44 @@ public class FunctionRegistryTest implements MemoPatternMatchSupported {
         Expression function = functionBuilder.build("foo", arguments).first;
         Assertions.assertEquals(function.getClass(), ExtendFunction.class);
         Assertions.assertEquals(arguments, function.getArguments());
+    }
+
+    @Test
+    public void testResolveOracleSystemPackageFunction() {
+        FunctionRegistry functionRegistry = new FunctionRegistry();
+        FunctionBuilder noArgBuilder = functionRegistry.findFunctionBuilder(
+                "DBMS_RANDOM", "VALUE", ImmutableList.of());
+        Assertions.assertInstanceOf(DbmsRandomValue.class,
+                noArgBuilder.build("VALUE", ImmutableList.of()).first);
+
+        ImmutableList<Expression> bounds = ImmutableList.of(Literal.of(10), Literal.of(20));
+        FunctionBuilder boundedBuilder = functionRegistry.findFunctionBuilder(
+                "dbms_random", "value", bounds);
+        Assertions.assertInstanceOf(DbmsRandomValue.class,
+                boundedBuilder.build("value", bounds).first);
+
+        FunctionBuilder randomBuilder = functionRegistry.findFunctionBuilder(
+                "DBMS_RANDOM", "RANDOM", ImmutableList.of());
+        Assertions.assertInstanceOf(DbmsRandomInteger.class,
+                randomBuilder.build("RANDOM", ImmutableList.of()).first);
+
+        ImmutableList<Expression> stringArguments = ImmutableList.of(Literal.of("x"), Literal.of(32));
+        FunctionBuilder stringBuilder = functionRegistry.findFunctionBuilder(
+                "DBMS_RANDOM", "STRING", stringArguments);
+        Assertions.assertInstanceOf(DbmsRandomString.class,
+                stringBuilder.build("STRING", stringArguments).first);
+
+        Assertions.assertThrows(AnalysisException.class, () -> functionRegistry.findFunctionBuilder(
+                "DBMS_RANDOM", "VALUE", ImmutableList.of(Literal.of(10))));
+
+        ImmutableList<Expression> blob = ImmutableList.of(new VarBinaryLiteral(new byte[] {1, 2, 3}));
+        FunctionBuilder lengthBuilder = functionRegistry.findFunctionBuilder("DBMS_LOB", "GETLENGTH", blob);
+        Assertions.assertInstanceOf(DbmsLobGetLength.class,
+                lengthBuilder.build("GETLENGTH", blob).first);
+
+        FunctionBuilder substrBuilder = functionRegistry.findFunctionBuilder("DBMS_LOB", "SUBSTR", blob);
+        Assertions.assertInstanceOf(DbmsLobSubstr.class,
+                substrBuilder.build("SUBSTR", blob).first);
     }
 
     @Test
