@@ -196,13 +196,13 @@ public abstract class StringLikeLiteral extends Literal implements ComparableLit
             if (targetType.isTinyIntType()) {
                 return Literal.of(Byte.valueOf(trimmedValue));
             } else if (targetType.isSmallIntType()) {
-                return Literal.of(Short.valueOf(trimmedValue));
+                return Literal.of(Short.valueOf(trimmedValue)).withDataType(targetType);
             } else if (targetType.isIntegerType()) {
-                return Literal.of(Integer.valueOf(trimmedValue));
+                return Literal.of(Integer.valueOf(trimmedValue)).withDataType(targetType);
             } else if (targetType.isBigIntType()) {
-                return Literal.of(Long.valueOf(trimmedValue));
+                return Literal.of(Long.valueOf(trimmedValue)).withDataType(targetType);
             } else if (targetType.isLargeIntType()) {
-                return Literal.of(new BigDecimal(trimmedValue).toBigInteger());
+                return Literal.of(new BigDecimal(trimmedValue).toBigInteger()).withDataType(targetType);
             } else {
                 throw new AnalysisException(String.format("Invalid target type %s", targetType));
             }

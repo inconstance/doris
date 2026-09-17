@@ -128,6 +128,7 @@ import org.apache.doris.nereids.types.FloatType;
 import org.apache.doris.nereids.types.IntegerType;
 import org.apache.doris.nereids.types.TinyIntType;
 import org.apache.doris.nereids.types.VarcharType;
+import org.apache.doris.nereids.types.coercion.IntegralType;
 import org.apache.doris.nereids.util.MemoTestUtils;
 
 import com.google.common.collect.ImmutableList;
@@ -173,6 +174,39 @@ class FoldConstantTest extends ExpressionRewriteTestHelper {
                 PARSER.parseExpression("cast(18446744073709551615 as unsigned) + cast(1 as unsigned)"));
         Assertions.assertThrows(AnalysisException.class,
                 () -> executor.rewrite(unsignedOverflow, context));
+    }
+
+    @Test
+    void testUnsignedCastFoldPreservesDescriptor() {
+        executor = new ExpressionRuleExecutor(ImmutableList.of(
+                bottomUp(FoldConstantRuleOnFE.VISITOR_INSTANCE)
+        ));
+        for (String type : ImmutableList.of("tinyint", "smallint", "int", "bigint")) {
+            for (String input : ImmutableList.of("cast(3.9 as decimal(2,1))", "'3'", "3.9e0")) {
+                Expression analyzed = ExpressionAnalyzer.analyzeFunction(null, null,
+                        PARSER.parseExpression("cast(" + input + " as " + type + " unsigned)"));
+                Expression folded = executor.rewrite(analyzed, context);
+                Assertions.assertInstanceOf(Literal.class, folded);
+                Assertions.assertEquals("3", ((Literal) folded).getStringValue());
+                Assertions.assertTrue(folded.getDataType().isUnsignedIntegerType());
+                Assertions.assertEquals(((IntegralType) analyzed.getDataType()).getTypeDescriptor(),
+                        ((IntegralType) folded.getDataType()).getTypeDescriptor());
+            }
+        }
+        for (String input : ImmutableList.of(
+                "18446744073709551615",
+                "cast(18446744073709551615 as decimal(20,0))",
+                "'18446744073709551615'")) {
+            Expression analyzed = ExpressionAnalyzer.analyzeFunction(null, null,
+                    PARSER.parseExpression("cast(" + input + " as unsigned)"));
+            Expression folded = executor.rewrite(analyzed, context);
+            Assertions.assertTrue(folded.getDataType().isUnsignedIntegerType());
+            Assertions.assertEquals("18446744073709551615", ((Literal) folded).getStringValue());
+            Expression overflow = ExpressionAnalyzer.analyzeFunction(null, null,
+                    PARSER.parseExpression("cast(" + input + " as unsigned) + 1"));
+            Assertions.assertThrows(AnalysisException.class,
+                    () -> executor.rewrite(overflow, context));
+        }
     }
 
     @Test

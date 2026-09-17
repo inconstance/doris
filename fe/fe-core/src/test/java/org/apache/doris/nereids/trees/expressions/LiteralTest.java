@@ -17,6 +17,7 @@
 
 package org.apache.doris.nereids.trees.expressions;
 
+import org.apache.doris.catalog.Type;
 import org.apache.doris.nereids.trees.expressions.literal.ArrayLiteral;
 import org.apache.doris.nereids.trees.expressions.literal.BooleanLiteral;
 import org.apache.doris.nereids.trees.expressions.literal.IntegerLiteral;
@@ -24,11 +25,15 @@ import org.apache.doris.nereids.trees.expressions.literal.Literal;
 import org.apache.doris.nereids.trees.expressions.literal.NullLiteral;
 import org.apache.doris.nereids.trees.expressions.literal.StringLiteral;
 import org.apache.doris.nereids.types.ArrayType;
+import org.apache.doris.nereids.types.BigIntType;
 import org.apache.doris.nereids.types.DataType;
 import org.apache.doris.nereids.types.IntegerType;
+import org.apache.doris.nereids.types.LargeIntType;
+import org.apache.doris.nereids.types.SmallIntType;
 import org.apache.doris.nereids.types.StringType;
 import org.apache.doris.nereids.types.StructField;
 import org.apache.doris.nereids.types.StructType;
+import org.apache.doris.nereids.types.coercion.IntegralType;
 import org.apache.doris.proto.Types.PGenericType;
 import org.apache.doris.proto.Types.PGenericType.TypeId;
 import org.apache.doris.proto.Types.PValues;
@@ -41,6 +46,23 @@ import java.util.Arrays;
 import java.util.List;
 
 class LiteralTest {
+
+    @Test
+    void testIntegralLiteralFactoriesPreserveDescriptor() {
+        for (IntegralType type : Arrays.asList(SmallIntType.INSTANCE, IntegerType.INSTANCE,
+                BigIntType.INSTANCE, LargeIntType.INSTANCE)) {
+            IntegralType unsignedType = type.withTypeDescriptor(Type.TYPE_DESCRIPTOR_UNSIGNED_MASK);
+            Literal original = (Literal) Literal.of(3).checkedCastTo(unsignedType);
+            Literal restored = Literal.fromLegacyLiteral(original.toLegacyLiteral(), unsignedType.toCatalogDataType());
+            Assertions.assertTrue(restored.getDataType().isUnsignedIntegerType());
+            Assertions.assertEquals("3", restored.getStringValue());
+            if (!type.isLargeIntType()) {
+                Literal created = Literal.convertToTypedLiteral(3, unsignedType);
+                Assertions.assertTrue(created.getDataType().isUnsignedIntegerType());
+                Assertions.assertEquals("3", created.getStringValue());
+            }
+        }
+    }
 
     @Test
     public void testEqual() {

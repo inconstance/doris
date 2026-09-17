@@ -61,13 +61,13 @@ public abstract class FractionalLiteral extends NumericLiteral {
             if (targetType.isTinyIntType()) {
                 return new TinyIntLiteral((byte) intValue.intValue());
             } else if (targetType.isSmallIntType()) {
-                return new SmallIntLiteral((short) intValue.intValue());
+                return new SmallIntLiteral((short) intValue.intValue()).withDataType(targetType);
             } else if (targetType.isIntegerType()) {
-                return new IntegerLiteral(intValue.intValue());
+                return new IntegerLiteral(intValue.intValue()).withDataType(targetType);
             } else if (targetType.isBigIntType()) {
-                return new BigIntLiteral(intValue.longValue());
+                return new BigIntLiteral(intValue.longValue()).withDataType(targetType);
             } else if (targetType.isLargeIntType()) {
-                return new LargeIntLiteral(intValue.toBigInteger());
+                return new LargeIntLiteral(intValue.toBigInteger()).withDataType(targetType);
             }
         } else if (targetType.isDateLikeType()) {
             BigDecimal decimal = new BigDecimal(getValue().toString());

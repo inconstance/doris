@@ -473,20 +473,20 @@ public abstract class Literal extends Expression implements LeafExpression {
             }
             case SMALLINT: {
                 IntLiteral intLiteral = (IntLiteral) literalExpr;
-                return new SmallIntLiteral((short) intLiteral.getValue());
+                return new SmallIntLiteral((short) intLiteral.getValue()).withDataType(dataType);
             }
             case INT: {
                 IntLiteral intLiteral = (IntLiteral) literalExpr;
-                return new IntegerLiteral((int) intLiteral.getValue());
+                return new IntegerLiteral((int) intLiteral.getValue()).withDataType(dataType);
             }
             case BIGINT: {
                 IntLiteral intLiteral = (IntLiteral) literalExpr;
-                return new BigIntLiteral(intLiteral.getValue());
+                return new BigIntLiteral(intLiteral.getValue()).withDataType(dataType);
             }
             case LARGEINT: {
                 org.apache.doris.analysis.LargeIntLiteral intLiteral
                         = (org.apache.doris.analysis.LargeIntLiteral) literalExpr;
-                return new LargeIntLiteral(intLiteral.getRealValue());
+                return new LargeIntLiteral(intLiteral.getRealValue()).withDataType(dataType);
             }
             case DATEV2: {
                 org.apache.doris.analysis.DateLiteral dateLiteral = (org.apache.doris.analysis.DateLiteral) literalExpr;
@@ -836,11 +836,11 @@ public abstract class Literal extends Expression implements LeafExpression {
         if (dataType.equals(TinyIntType.INSTANCE)) {
             return new TinyIntLiteral(number.byteValue());
         } else if (dataType.equals(SmallIntType.INSTANCE)) {
-            return new SmallIntLiteral(number.shortValue());
+            return new SmallIntLiteral(number.shortValue()).withDataType(dataType);
         } else if (dataType.equals(IntegerType.INSTANCE)) {
-            return new IntegerLiteral(number.intValue());
+            return new IntegerLiteral(number.intValue()).withDataType(dataType);
         } else if (dataType.equals(BigIntType.INSTANCE)) {
-            return new BigIntLiteral(number.longValue());
+            return new BigIntLiteral(number.longValue()).withDataType(dataType);
         } else if (dataType.equals(DoubleType.INSTANCE)) {
             return new DoubleLiteral(number.doubleValue());
         }
